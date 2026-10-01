@@ -1,6 +1,9 @@
 -- @Discord_alvin6974. / Bloxstrike Skinchanger / UIManager (arvn-based, viewport skin browser)
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
+local Players = game:GetService("Players")
+
+local LocalPlayer = Players.LocalPlayer
 
 local API = nil
 local Config = nil
@@ -106,18 +109,38 @@ local function renderModelInViewport(vp, modelName, skinName)
     clone.Parent = vp
 
     local cf, sz = clone:GetBoundingBox()
+
+    -- Guard against degenerate bounding boxes: some skin models are tiny and
+    -- produce a camera so close that nothing is visible.
     local maxDim = math.max(sz.X, sz.Y, sz.Z, 0.5)
+    if maxDim < 0.05 then maxDim = 2 end
     local dist = maxDim * 0.81
+    if dist < 1 then dist = 3 end
 
     local cam = Instance.new("Camera")
     cam.FieldOfView = 50
     local camPos = cf.Position + Vector3.new(dist * 0.75, dist * 0.35, dist * 0.8)
     cam.CFrame = CFrame.new(camPos, cf.Position)
     cam.Parent = vp
+
     vp.CurrentCamera = cam
     vp.LightColor = Color3.fromRGB(245, 245, 255)
     vp.Ambient = Color3.fromRGB(150, 150, 160)
     vp.LightDirection = Vector3.new(-1, -1.2, -1).Unit
+
+    -- Make sure the model is not clipped away and renders above the card
+    pcall(function()
+        vp.BackgroundTransparency = 1
+        vp.ClipsDescendants = false
+        vp.Visible = true
+        for _, d in ipairs(clone:GetDescendants()) do
+            if d:IsA("BasePart") then
+                d.LocalTransparencyModifier = 0
+                d.CanCollide = false
+                d.Anchored = true
+            end
+        end
+    end)
 end
 
 -- Close the popup
@@ -136,9 +159,59 @@ local function openPopup(category, weaponName)
     local library = ArvnRef
     if not library then return end
 
-    -- Get the ScreenGui from arvn
+    -- Find the ScreenGui. Try the library reference first, then fall back to
+    -- scanning likely parents. Built with explicit inserts so a missing
+    -- gethui() never puts a nil hole in the middle of the list.
     local screenGui = library.ScreenGui
-    if not screenGui then return end
+
+    if not screenGui then
+        local candidates = {}
+        pcall(function()
+            local hui = nil
+            if type(gethui) == "function" then hui = gethui() end
+            if hui then table.insert(candidates, hui) end
+            table.insert(candidates, game:GetService("CoreGui"))
+            if LocalPlayer then
+                table.insert(candidates, LocalPlayer:FindFirstChild("PlayerGui"))
+            end
+        end)
+
+        -- First pass: prefer the arvn-owned ScreenGui
+        for _, gui in ipairs(candidates) do
+            if gui then
+                for _, child in ipairs(gui:GetChildren()) do
+                    if child:IsA("ScreenGui") then
+                        local lower = child.Name:lower()
+                        if lower:find("arvn", 1, true) then
+                            screenGui = child
+                            break
+                        end
+                    end
+                end
+            end
+            if screenGui then break end
+        end
+
+        -- Second pass: any ScreenGui at all
+        if not screenGui then
+            for _, gui in ipairs(candidates) do
+                if gui then
+                    for _, child in ipairs(gui:GetChildren()) do
+                        if child:IsA("ScreenGui") then
+                            screenGui = child
+                            break
+                        end
+                    end
+                end
+                if screenGui then break end
+            end
+        end
+    end
+
+    if not screenGui then
+        safeNotify("Skinchanger", "Cannot find ScreenGui", "Error")
+        return
+    end
 
     -- Get skins for this weapon
     local skins = {}
@@ -328,6 +401,7 @@ local function openPopup(category, weaponName)
     end
 
     UIManager.Popup = popup
+    safeNotify("Skinchanger", "Showing " .. #skins .. " " .. category .. " skins for " .. weaponName, "Info")
 end
 
 function UIManager.init(config, arvn, api, database, knifeCatalog, gunCatalog, gloveCatalog, mainWindow)
