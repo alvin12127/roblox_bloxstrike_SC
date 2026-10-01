@@ -5,8 +5,11 @@ if _G.__alvinSkinChangerJanitor then
     _G.__alvinSkinChangerJanitor = nil
 end
 
--- Load arvn UI library
-local Arvn = loadstring(game:HttpGet("https://raw.githubusercontent.com/koteqjjjj/arvn/main/arvn.lua"))()
+-- Use existing arvn instance from main cheat, or create new one if not available
+local Arvn = _G.arvn
+if not Arvn then
+    Arvn = loadstring(game:HttpGet("https://raw.githubusercontent.com/koteqjjjj/arvn/main/arvn.lua"))()
+end
 
 -- Module loader
 local modules = {}
