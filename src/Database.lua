@@ -218,4 +218,22 @@ function Database.getWeaponSkinList(weaponName)
     return list
 end
 
+-- Get list of knife model names for dropdown
+function Database.getKnifeList()
+    local names = {}
+    for _, name in ipairs(Database.KnifeModels) do
+        table.insert(names, name)
+    end
+    return names
+end
+
+-- Get list of weapon names for dropdown
+function Database.getWeaponList()
+    local names = {}
+    for _, name in ipairs(Database.WeaponTypes) do
+        table.insert(names, name)
+    end
+    return names
+end
+
 return Database

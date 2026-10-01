@@ -625,6 +625,42 @@ function GunCatalog.init(Tab, Config, API, Library, Database)
     showModelView()
 end
 
+-- Get list of gun names for dropdown
+function GunCatalog.getNames()
+    local names = {}
+    if Database and Database.getWeaponList then
+        local ok, list = pcall(function() return Database.getWeaponList() end)
+        if ok and list then
+            for _, name in ipairs(list) do
+                table.insert(names, name)
+            end
+        end
+    end
+    -- Fallback: return default list if Database not available
+    if #names == 0 then
+        return {"AK-47", "M4A1", "AWP", "Desert Eagle", "USP-S", "Glock-18"}
+    end
+    return names
+end
+
+-- Get list of skins for a specific weapon
+function GunCatalog.getSkins(weaponName)
+    local skins = {}
+    if Database and Database.getWeaponSkinList then
+        local ok, list = pcall(function() return Database.getWeaponSkinList(weaponName) end)
+        if ok and list then
+            for _, name in ipairs(list) do
+                table.insert(skins, name)
+            end
+        end
+    end
+    -- Fallback: return default list if Database not available
+    if #skins == 0 then
+        return {"Special", "Fade", "Stock", "Vanilla"}
+    end
+    return skins
+end
+
 function GunCatalog.cleanup()
     cleanupViewports()
     for _, conn in ipairs(GunCatalog.Connections) do

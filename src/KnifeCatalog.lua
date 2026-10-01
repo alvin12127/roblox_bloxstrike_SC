@@ -631,6 +631,42 @@ function KnifeCatalog.init(Tab, Config, API, Library, Database)
     showModelView()
 end
 
+-- Get list of knife model names for dropdown
+function KnifeCatalog.getNames()
+    local names = {}
+    if Database and Database.getKnifeList then
+        local ok, list = pcall(function() return Database.getKnifeList() end)
+        if ok and list then
+            for _, name in ipairs(list) do
+                table.insert(names, name)
+            end
+        end
+    end
+    -- Fallback: return default list if Database not available
+    if #names == 0 then
+        return {"Butterfly Knife", "Karambit", "M9 Bayonet", "Skeleton", "Default"}
+    end
+    return names
+end
+
+-- Get list of skins for a specific knife model
+function KnifeCatalog.getSkins(knifeModel)
+    local skins = {}
+    if Database and Database.getKnifeSkinList then
+        local ok, list = pcall(function() return Database.getKnifeSkinList(knifeModel) end)
+        if ok and list then
+            for _, name in ipairs(list) do
+                table.insert(skins, name)
+            end
+        end
+    end
+    -- Fallback: return default list if Database not available
+    if #skins == 0 then
+        return {"Special", "Fade", "Stock", "Vanilla"}
+    end
+    return skins
+end
+
 function KnifeCatalog.cleanup()
     cleanupViewports()
     for _, conn in ipairs(KnifeCatalog.Connections) do
