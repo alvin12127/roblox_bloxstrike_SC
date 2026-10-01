@@ -1,633 +1,274 @@
--- @Discord_alvin6974. / Bloxstrike Skinchanger / UIManager (arvn-based, viewport skin browser)
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local RunService = game:GetService("RunService")
-local Players = game:GetService("Players")
-
-local LocalPlayer = Players.LocalPlayer
-
-local API = nil
-local Config = nil
+-- Seeto.Solutionz / Bloxstrike Skinchanger / UIManager
 local Database = nil
 local KnifeCatalog = nil
 local GunCatalog = nil
-local GloveCatalog = nil
-local ArvnRef = nil
+
+local function getDatabase()
+    if Database then return Database end
+    if type(readfile) == "function" then
+        local paths = {
+            "Seeto.Solutionz-Bloxstrike-Skinchanger/src/Database.lua",
+            "Bloxstrike-Skinchanger/src/Database.lua",
+            "src/Database.lua",
+            "Database.lua"
+        }
+        for _, p in ipairs(paths) do
+            local ok, content = pcall(readfile, p)
+            if ok and content then
+                local fn = loadstring(content)
+                if fn then
+                    Database = fn()
+                    return Database
+                end
+            end
+        end
+    end
+    local okHttp, content = pcall(function()
+        return game:HttpGet("https://raw.githubusercontent.com/euphonee/Seeto.Solutionz-Bloxstrike-Skinchanger/main/src/Database.lua?t=" .. tostring(os.time()))
+    end)
+    if okHttp and content then
+        local fn = loadstring(content)
+        if fn then
+            Database = fn()
+            return Database
+        end
+    end
+    return nil
+end
+
+local function getKnifeCatalog()
+    if KnifeCatalog then return KnifeCatalog end
+    if type(readfile) == "function" then
+        local paths = {
+            "Seeto.Solutionz-Bloxstrike-Skinchanger/src/KnifeCatalog.lua",
+            "Bloxstrike-Skinchanger/src/KnifeCatalog.lua",
+            "src/KnifeCatalog.lua",
+            "KnifeCatalog.lua"
+        }
+        for _, p in ipairs(paths) do
+            local ok, content = pcall(readfile, p)
+            if ok and content then
+                local fn = loadstring(content)
+                if fn then
+                    KnifeCatalog = fn()
+                    return KnifeCatalog
+                end
+            end
+        end
+    end
+    local okHttp, content = pcall(function()
+        return game:HttpGet("https://raw.githubusercontent.com/euphonee/Seeto.Solutionz-Bloxstrike-Skinchanger/main/src/KnifeCatalog.lua?t=" .. tostring(os.time()))
+    end)
+    if okHttp and content then
+        local fn = loadstring(content)
+        if fn then
+            KnifeCatalog = fn()
+            return KnifeCatalog
+        end
+    end
+    return nil
+end
+
+local function getGunCatalog()
+    if GunCatalog then return GunCatalog end
+    if type(readfile) == "function" then
+        local paths = {
+            "Seeto.Solutionz-Bloxstrike-Skinchanger/src/GunCatalog.lua",
+            "Bloxstrike-Skinchanger/src/GunCatalog.lua",
+            "src/GunCatalog.lua",
+            "GunCatalog.lua"
+        }
+        for _, p in ipairs(paths) do
+            local ok, content = pcall(readfile, p)
+            if ok and content then
+                local fn = loadstring(content)
+                if fn then
+                    GunCatalog = fn()
+                    return GunCatalog
+                end
+            end
+        end
+    end
+    local okHttp, content = pcall(function()
+        return game:HttpGet("https://raw.githubusercontent.com/euphonee/Seeto.Solutionz-Bloxstrike-Skinchanger/main/src/GunCatalog.lua?t=" .. tostring(os.time()))
+    end)
+    if okHttp and content then
+        local fn = loadstring(content)
+        if fn then
+            GunCatalog = fn()
+            return GunCatalog
+        end
+    end
+    return nil
+end
 
 local UIManager = {
     Initialized = false,
-    MainTab = nil,
-    CurrentCategory = "Knives",
-    CurrentWeapon = nil,
-    Popup = nil,
-    PopupOverlay = nil,
-    ViewportCleanups = {}
+    Library = nil,
+    Window = nil,
+    Tabs = {}
 }
 
-local SkinsLib = nil
-local function getSkinsLib()
-    if SkinsLib then return SkinsLib end
-    pcall(function()
-        SkinsLib = require(ReplicatedStorage.Database.Components.Libraries.Skins)
-    end)
-    return SkinsLib
+function UIManager.bindCatalog(kc, gc)
+    KnifeCatalog = kc
+    if gc then GunCatalog = gc end
 end
 
-local function safeNotify(title, content, kind)
-    if ArvnRef and ArvnRef.Notify then
-        pcall(ArvnRef.Notify, ArvnRef, {Title = title, Content = content, Kind = kind or "Info"})
-    end
+function UIManager.bindCatalogs(kc, gc)
+    KnifeCatalog = kc
+    GunCatalog = gc
 end
 
-local function cleanupViewports()
-    for _, fn in ipairs(UIManager.ViewportCleanups) do
-        pcall(fn)
-    end
-    UIManager.ViewportCleanups = {}
-end
-
--- Render a 3D model into a ViewportFrame
-local function renderModelInViewport(vp, modelName, skinName)
-    if not vp then return end
-    vp:ClearAllChildren()
-
-    -- Placeholder label while loading / on failure
-    local ph = Instance.new("TextLabel")
-    ph.Size = UDim2.fromScale(1, 1)
-    ph.BackgroundTransparency = 1
-    ph.Text = "..."
-    ph.TextColor3 = Color3.fromRGB(160, 160, 170)
-    ph.Font = Enum.Font.Gotham
-    ph.TextSize = 12
-    ph.ZIndex = 504
-    ph.Parent = vp
-
-    local lib = getSkinsLib()
-    if not lib then
-        ph.Text = "No SkinsLib"
-        return
+function UIManager.init(Config, Library, API, Db, unloadCallback)
+    if type(API) == "function" and Db == nil then
+        unloadCallback = API
+        API = nil
+        Db = nil
+    elseif type(Db) == "function" and unloadCallback == nil then
+        unloadCallback = Db
+        Db = nil
     end
 
-    -- Knives: "Default" maps to "CT Knife" (same as original catalogs)
-    local targetModel = modelName
-    if targetModel == "Default" then
-        targetModel = "CT Knife"
-    end
+    Database = Db or Database or getDatabase()
+    KnifeCatalog = KnifeCatalog or getKnifeCatalog()
+    GunCatalog = GunCatalog or getGunCatalog()
 
-    -- Try the requested skin first, then a broad fallback list
-    local model = nil
-    local trySkins = {skinName, "Stock", "Vanilla", "Fade", "Midas", "Lore", "Ren", "Lebron James"}
-    for _, s in ipairs(trySkins) do
-        if s and s ~= "Random" and s ~= "Special" and s ~= "Default" then
-            local ok, m = pcall(function()
-                return lib.GetCharacterModel(targetModel, s, 0.001)
-            end)
-            if ok and m then
-                model = m
-                break
-            end
-        end
-    end
-
-    if not model then
-        pcall(function()
-            model = lib.GetCharacterModel(targetModel, "Stock", 0.001)
-        end)
-    end
-
-    if not model then
-        ph.Text = "No model"
-        return
-    end
-
-    -- Remove placeholder once we have a model
-    ph:Destroy()
-
-    local clone = nil
-    local ok, res = pcall(function() return model:Clone() end)
-    clone = ok and res or model
-    if not clone then return end
-
-    clone.Parent = vp
-
-    local cf, sz = clone:GetBoundingBox()
-
-    -- Guard against degenerate bounding boxes: some skin models are tiny and
-    -- produce a camera so close that nothing is visible.
-    local maxDim = math.max(sz.X, sz.Y, sz.Z, 0.5)
-    if maxDim < 0.05 then maxDim = 2 end
-    local dist = maxDim * 0.81
-    if dist < 1 then dist = 3 end
-
-    local cam = Instance.new("Camera")
-    cam.FieldOfView = 50
-    local camPos = cf.Position + Vector3.new(dist * 0.75, dist * 0.35, dist * 0.8)
-    cam.CFrame = CFrame.new(camPos, cf.Position)
-    cam.Parent = vp
-
-    vp.CurrentCamera = cam
-    vp.LightColor = Color3.fromRGB(245, 245, 255)
-    vp.Ambient = Color3.fromRGB(150, 150, 160)
-    vp.LightDirection = Vector3.new(-1, -1.2, -1).Unit
-
-    -- Make sure the model is not clipped away and renders above the card
-    pcall(function()
-        vp.BackgroundTransparency = 1
-        vp.ClipsDescendants = false
-        vp.Visible = true
-        for _, d in ipairs(clone:GetDescendants()) do
-            if d:IsA("BasePart") then
-                d.LocalTransparencyModifier = 0
-                d.CanCollide = false
-                d.Anchored = true
-            end
-        end
-    end)
-end
-
--- Close the popup (and its dim overlay)
-local function closePopup()
-    cleanupViewports()
-    if UIManager.PopupOverlay then
-        pcall(function() UIManager.PopupOverlay:Destroy() end)
-        UIManager.PopupOverlay = nil
-    end
-    if UIManager.Popup then
-        pcall(function() UIManager.Popup:Destroy() end)
-        UIManager.Popup = nil
-    end
-end
-
--- Open the skin browser popup
-local function openPopup(category, weaponName)
-    closePopup()
-
-    local library = ArvnRef
-    if not library then return end
-
-    -- Find the ScreenGui. Try the library reference first, then fall back to
-    -- scanning likely parents. Built with explicit inserts so a missing
-    -- gethui() never puts a nil hole in the middle of the list.
-    local screenGui = library.ScreenGui
-
-    if not screenGui then
-        local candidates = {}
-        pcall(function()
-            local hui = nil
-            if type(gethui) == "function" then hui = gethui() end
-            if hui then table.insert(candidates, hui) end
-            table.insert(candidates, game:GetService("CoreGui"))
-            if LocalPlayer then
-                table.insert(candidates, LocalPlayer:FindFirstChild("PlayerGui"))
-            end
-        end)
-
-        -- First pass: prefer the arvn-owned ScreenGui
-        for _, gui in ipairs(candidates) do
-            if gui then
-                for _, child in ipairs(gui:GetChildren()) do
-                    if child:IsA("ScreenGui") then
-                        local lower = child.Name:lower()
-                        if lower:find("arvn", 1, true) then
-                            screenGui = child
-                            break
-                        end
-                    end
-                end
-            end
-            if screenGui then break end
-        end
-
-        -- Second pass: any ScreenGui at all
-        if not screenGui then
-            for _, gui in ipairs(candidates) do
-                if gui then
-                    for _, child in ipairs(gui:GetChildren()) do
-                        if child:IsA("ScreenGui") then
-                            screenGui = child
-                            break
-                        end
-                    end
-                end
-                if screenGui then break end
-            end
-        end
-    end
-
-    if not screenGui then
-        safeNotify("Skinchanger", "Cannot find ScreenGui", "Error")
-        return
-    end
-
-    -- Get skins for this weapon
-    local skins = {}
-    if category == "Knives" then
-        if Database and Database.getKnifeSkinList then
-            pcall(function() skins = Database.getKnifeSkinList(weaponName) end)
-        end
-    else
-        if Database and Database.getWeaponSkinList then
-            pcall(function() skins = Database.getWeaponSkinList(weaponName) end)
-        end
-    end
-    if #skins == 0 then
-        skins = {"Special", "Fade", "Stock", "Vanilla"}
-    end
-
-    -- Dim overlay behind the popup. Clicking anywhere on it closes the
-    -- browser, so the popup can never get stuck on screen.
-    local overlay = Instance.new("TextButton")
-    overlay.Name = "SkinBrowserOverlay"
-    overlay.Size = UDim2.fromScale(1, 1)
-    overlay.Position = UDim2.fromScale(0, 0)
-    overlay.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-    overlay.BackgroundTransparency = 0.5
-    overlay.BorderSizePixel = 0
-    overlay.Text = ""
-    overlay.ZIndex = 499
-    overlay.Parent = screenGui
-    overlay.MouseButton1Click:Connect(function()
-        closePopup()
-    end)
-
-    -- Popup frame
-    local popup = Instance.new("Frame")
-    popup.Name = "SkinBrowserPopup"
-    popup.Size = UDim2.fromOffset(560, 420)
-    popup.Position = UDim2.fromScale(0.5, 0.5)
-    popup.AnchorPoint = Vector2.new(0.5, 0.5)
-    popup.BackgroundColor3 = Color3.fromRGB(14, 14, 16)
-    popup.BorderSizePixel = 0
-    popup.ZIndex = 500
-    popup.Parent = screenGui
-
-    -- Track the overlay so cleanup removes both
-    UIManager.PopupOverlay = overlay
-
-    Instance.new("UICorner", popup).CornerRadius = UDim.new(0, 10)
-
-    local stroke = Instance.new("UIStroke", popup)
-    stroke.Color = Color3.fromRGB(45, 48, 58)
-    stroke.Transparency = 0.65
-
-    -- Header
-    local header = Instance.new("Frame")
-    header.Size = UDim2.new(1, 0, 0, 36)
-    header.BackgroundColor3 = Color3.fromRGB(23, 23, 25)
-    header.BorderSizePixel = 0
-    header.ZIndex = 501
-    header.Parent = popup
-    Instance.new("UICorner", header).CornerRadius = UDim.new(0, 10)
-
-    local title = Instance.new("TextLabel")
-    title.Size = UDim2.new(1, -40, 1, 0)
-    title.Position = UDim2.fromOffset(12, 0)
-    title.BackgroundTransparency = 1
-    title.Text = weaponName .. " - " .. category .. " Skins (" .. #skins .. ")"
-    title.TextColor3 = Color3.fromRGB(255, 255, 255)
-    title.Font = Enum.Font.GothamMedium
-    title.TextSize = 13
-    title.TextXAlignment = Enum.TextXAlignment.Left
-    title.ZIndex = 502
-    title.Parent = header
-
-    local closeBtn = Instance.new("TextButton")
-    closeBtn.Size = UDim2.fromOffset(30, 30)
-    closeBtn.Position = UDim2.new(1, -30, 0, 3)
-    closeBtn.BackgroundTransparency = 1
-    closeBtn.Text = "X"
-    closeBtn.TextColor3 = Color3.fromRGB(200, 200, 210)
-    closeBtn.Font = Enum.Font.GothamBold
-    closeBtn.TextSize = 16
-    closeBtn.ZIndex = 503
-    closeBtn.Parent = header
-    closeBtn.MouseButton1Click:Connect(closePopup)
-
-    -- Scrolling grid. AutomaticCanvasSize is required - a zero CanvasSize
-    -- is why the grid content never appeared inside the popup.
-    local scroll = Instance.new("ScrollingFrame")
-    scroll.Size = UDim2.new(1, -16, 1, -48)
-    scroll.Position = UDim2.fromOffset(8, 42)
-    scroll.BackgroundTransparency = 1
-    scroll.BorderSizePixel = 0
-    scroll.ScrollBarThickness = 3
-    scroll.ScrollBarImageColor3 = Color3.fromRGB(186, 140, 255)
-    scroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
-    scroll.CanvasSize = UDim2.new(0, 0, 0, 0)
-    scroll.ZIndex = 501
-    scroll.Parent = popup
-
-    local grid = Instance.new("UIGridLayout")
-    grid.CellSize = UDim2.fromOffset(130, 150)
-    grid.CellPadding = UDim2.fromOffset(8, 8)
-    grid.SortOrder = Enum.SortOrder.LayoutOrder
-    grid.Parent = scroll
-
-    -- Rarity colors
-    local rarityColors = {
-        Special = Color3.fromRGB(255, 215, 0),
-        Stock = Color3.fromRGB(150, 155, 165),
-        Default = Color3.fromRGB(150, 155, 165),
-        Vanilla = Color3.fromRGB(150, 155, 165),
-    }
-
-    -- Create skin cards
-    for idx, skinName in ipairs(skins) do
-        local rarityColor = rarityColors[skinName] or Color3.fromRGB(75, 106, 255)
-
-        local card = Instance.new("TextButton")
-        card.Name = "Skin_" .. idx
-        card.Size = UDim2.fromOffset(130, 150)
-        card.BackgroundColor3 = Color3.fromRGB(30, 30, 35)
-        card.BorderSizePixel = 0
-        card.Text = ""
-        card.LayoutOrder = idx
-        card.ZIndex = 502
-        card.Parent = scroll
-        Instance.new("UICorner", card).CornerRadius = UDim.new(0, 6)
-
-        local cardStroke = Instance.new("UIStroke", card)
-        cardStroke.Color = Color3.fromRGB(45, 48, 58)
-        cardStroke.Transparency = 0.5
-
-        -- Viewport
-        local vp = Instance.new("ViewportFrame")
-        vp.Size = UDim2.new(1, -6, 0, 100)
-        vp.Position = UDim2.fromOffset(3, 3)
-        vp.BackgroundTransparency = 1
-        vp.ZIndex = 503
-        vp.Parent = card
-
-        renderModelInViewport(vp, weaponName, skinName)
-
-        -- Rarity bar
-        local bar = Instance.new("Frame")
-        bar.Size = UDim2.new(1, 0, 0, 3)
-        bar.Position = UDim2.new(0, 0, 1, -3)
-        bar.BackgroundColor3 = rarityColor
-        bar.BorderSizePixel = 0
-        bar.ZIndex = 504
-        bar.Parent = card
-
-        -- Skin name
-        local nameLabel = Instance.new("TextLabel")
-        nameLabel.Size = UDim2.new(1, -6, 0, 20)
-        nameLabel.Position = UDim2.new(0, 3, 0, 106)
-        nameLabel.BackgroundTransparency = 1
-        nameLabel.Text = skinName
-        nameLabel.TextColor3 = rarityColor
-        nameLabel.Font = Enum.Font.GothamBold
-        nameLabel.TextSize = 12
-        nameLabel.TextXAlignment = Enum.TextXAlignment.Center
-        nameLabel.TextTruncate = Enum.TextTruncate.AtEnd
-        nameLabel.ZIndex = 504
-        nameLabel.Parent = card
-
-        -- Model name
-        local modelLabel = Instance.new("TextLabel")
-        modelLabel.Size = UDim2.new(1, -6, 0, 16)
-        modelLabel.Position = UDim2.new(0, 3, 0, 126)
-        modelLabel.BackgroundTransparency = 1
-        modelLabel.Text = weaponName
-        modelLabel.TextColor3 = Color3.fromRGB(140, 140, 150)
-        modelLabel.Font = Enum.Font.Gotham
-        modelLabel.TextSize = 10
-        modelLabel.TextXAlignment = Enum.TextXAlignment.Center
-        modelLabel.TextTruncate = Enum.TextTruncate.AtEnd
-        modelLabel.ZIndex = 504
-        modelLabel.Parent = card
-
-        -- Hover highlight
-        card.MouseEnter:Connect(function()
-            cardStroke.Color = Color3.fromRGB(100, 105, 120)
-        end)
-        card.MouseLeave:Connect(function()
-            cardStroke.Color = Color3.fromRGB(45, 48, 58)
-        end)
-
-        -- Click to apply
-        card.MouseButton1Click:Connect(function()
-            if category == "Knives" then
-                Config.KNIFE_MODEL = weaponName
-                Config.KNIFE_SKIN = skinName
-                if API and API.setKnife then
-                    pcall(API.setKnife, weaponName, skinName)
-                end
-            else
-                Config.SELECTED_WEAPON_TYPE = weaponName
-                if API and API.setWeaponSkin then
-                    pcall(API.setWeaponSkin, weaponName, skinName)
-                end
-            end
-            safeNotify("Skinchanger", weaponName .. " - " .. skinName, "Success")
-            closePopup()
-        end)
-    end
-
-    UIManager.Popup = popup
-    safeNotify("Skinchanger", "Showing " .. #skins .. " " .. category .. " skins for " .. weaponName, "Info")
-end
-
-function UIManager.init(config, arvn, api, database, knifeCatalog, gunCatalog, gloveCatalog, mainWindow)
     if UIManager.Initialized then return end
     UIManager.Initialized = true
+    UIManager.Library = Library
 
-    Config = config
-    API = api
-    Database = database
-    KnifeCatalog = knifeCatalog
-    GunCatalog = gunCatalog
-    GloveCatalog = gloveCatalog
-    ArvnRef = arvn
-
-    local Window = mainWindow
-    if not Window and arvn and arvn.CreateWindow then
-        Window = arvn:CreateWindow({
-            Title = "Skin Changer",
-            Author = "@Discord_alvin6974.",
-            Folder = "Bloxstrike_Skinchanger"
-        })
-    end
-
-    if not Window then
-        UIManager.Initialized = false
-        return
-    end
-
-    local Main = nil
-    pcall(function()
-        Main = Window:Group("Skinchanger")
-    end)
-    if not Main then
-        UIManager.Initialized = false
-        return
-    end
-
-    local Tab = Main:Tab({Name = "Skins", Icon = "palette"})
-
-    -- ==========================================
-    -- KNIVES
-    -- ==========================================
-    local KnivesSection = Tab:Section("Knives")
-
-    local knifeNames = {}
-    if KnifeCatalog and KnifeCatalog.getNames then
-        pcall(function() knifeNames = KnifeCatalog.getNames() end)
-    end
-    if #knifeNames == 0 and Database and Database.getKnifeList then
-        pcall(function() knifeNames = Database.getKnifeList() end)
-    end
-    if #knifeNames == 0 then
-        knifeNames = {"Butterfly Knife", "Karambit", "M9 Bayonet", "Skeleton", "Default"}
-    end
-
-    local selectedKnife = Config.KNIFE_MODEL or knifeNames[1]
-
-    KnivesSection:Dropdown({
-        Name = "Knife model",
-        Values = knifeNames,
-        Default = selectedKnife,
-        Description = "Select a knife model",
-        Callback = function(v)
-            selectedKnife = v
-            Config.KNIFE_MODEL = v
-        end
-    })
-
-    -- Get actual skins for selected knife
-    local knifeSkins = {"Special", "Random", "Stock"}
-    if Database and Database.getKnifeSkinList then
-        pcall(function()
-            local list = Database.getKnifeSkinList(selectedKnife)
-            if list and #list > 0 then knifeSkins = list end
-        end)
-    end
-
-    KnivesSection:Dropdown({
-        Name = "Knife skin",
-        Values = knifeSkins,
-        Default = Config.KNIFE_SKIN or "Special",
-        Description = "Select a skin for the chosen knife",
-        Callback = function(v)
-            Config.KNIFE_SKIN = v
-            if API and API.setKnife then
-                pcall(API.setKnife, Config.KNIFE_MODEL or selectedKnife, v)
+    -- Apply theme if available
+    if Config.UI_THEME then
+        for prop, val in pairs(Config.UI_THEME) do
+            if Library[prop] ~= nil then
+                Library[prop] = val
             end
-            safeNotify("Skinchanger", (Config.KNIFE_MODEL or selectedKnife) .. " - " .. v, "Success")
         end
-    })
-
-    KnivesSection:Button({
-        Name = "Browse knife skins (visual)",
-        Callback = function()
-            openPopup("Knives", Config.KNIFE_MODEL or selectedKnife)
-        end
-    })
-
-    -- ==========================================
-    -- WEAPONS
-    -- ==========================================
-    local GunsSection = Tab:Section({Name = "Guns", Side = "Right"})
-
-    local gunNames = {}
-    if GunCatalog and GunCatalog.getNames then
-        pcall(function() gunNames = GunCatalog.getNames() end)
-    end
-    if #gunNames == 0 and Database and Database.getWeaponList then
-        pcall(function() gunNames = Database.getWeaponList() end)
-    end
-    if #gunNames == 0 then
-        gunNames = {"AK-47", "M4A1-S", "AWP", "Desert Eagle", "USP-S", "Glock-18"}
     end
 
-    local selectedGun = Config.SELECTED_WEAPON_TYPE or gunNames[1]
+    -- Create Window (sized for catalog view)
+    local defaultW = Config.WINDOW_SIZE_X or 620
+    local defaultH = Config.WINDOW_SIZE_Y or 390
+    if defaultW < 560 then defaultW = 620 end
+    if defaultH < 340 then defaultH = 390 end
 
-    GunsSection:Dropdown({
-        Name = "Weapon",
-        Values = gunNames,
-        Default = selectedGun,
-        Description = "Select a weapon",
-        Callback = function(v)
-            selectedGun = v
-            Config.SELECTED_WEAPON_TYPE = v
-        end
-    })
-
-    -- Get actual skins for selected gun
-    local gunSkins = {"Special", "Random", "Stock"}
-    if Database and Database.getWeaponSkinList then
-        pcall(function()
-            local list = Database.getWeaponSkinList(selectedGun)
-            if list and #list > 0 then gunSkins = list end
-        end)
-    end
-
-    GunsSection:Dropdown({
-        Name = "Weapon skin",
-        Values = gunSkins,
-        Default = "Special",
-        Description = "Select a skin for the chosen weapon",
-        Callback = function(v)
-            if API and API.setWeaponSkin then
-                pcall(API.setWeaponSkin, Config.SELECTED_WEAPON_TYPE or selectedGun, v)
+    local Window = Library:CreateWindow({
+        Title = "Seeto.SolutionZ / Bloxstrike Skinchanger",
+        Center = true,
+        AutoShow = true,
+        TabPadding = 6,
+        MenuFadeTime = 0.2,
+        Size = UDim2.fromOffset(defaultW, defaultH),
+        MinWidth = 520,
+        MinHeight = 320,
+        ToggleKey = Config.TOGGLE_UI_KEY or Enum.KeyCode.Insert,
+        UnloadKey = Config.UNLOAD_KEY or Enum.KeyCode.K,
+        CloseCallback = unloadCallback,
+        ResizeCallback = function(w, h)
+            if Config.WINDOW_SIZE_X ~= w or Config.WINDOW_SIZE_Y ~= h then
+                Config.WINDOW_SIZE_X = w
+                Config.WINDOW_SIZE_Y = h
+                if Config.queueSave then Config.queueSave() else Config.save() end
             end
-            safeNotify("Skinchanger", (Config.SELECTED_WEAPON_TYPE or selectedGun) .. " - " .. v, "Success")
         end
     })
+    UIManager.Window = Window
 
-    GunsSection:Button({
-        Name = "Browse weapon skins (visual)",
-        Callback = function()
-            openPopup("Guns", Config.SELECTED_WEAPON_TYPE or selectedGun)
-        end
-    })
-
-    -- ==========================================
-    -- PRESETS
-    -- ==========================================
-    local PresetsSection = Tab:Section({Name = "Presets", Side = "Right"})
-
-    local presets = {
-        {Name = "All Special", Fn = function() return API.setAllSpecial end},
-        {Name = "All Random", Fn = function() return API.setAllRandom end},
-        {Name = "All Default", Fn = function() return API.setAllDefault end},
-        {Name = "Reroll Random", Fn = function() return API.rerollRandom end},
+    -- Add Tabs: Knife, Guns, Settings
+    local Tabs = {
+        Knife = Window:AddTab("Knife"),
+        Guns = Window:AddTab("Guns"),
+        Settings = Window:AddTab("Settings")
     }
+    UIManager.Tabs = Tabs
 
-    for _, preset in ipairs(presets) do
-        PresetsSection:Button({
-            Name = preset.Name,
-            Callback = function()
-                local fn = preset.Fn()
-                if fn then
-                    pcall(fn)
-                    safeNotify("Skinchanger", preset.Name .. " applied!", "Success")
-                end
-            end
-        })
+    -- 1. Initialize Visual Knife Catalog in Knife Tab
+    if KnifeCatalog and KnifeCatalog.init then
+        KnifeCatalog.init(Tabs.Knife, Config, API, Library, Database)
     end
 
-    PresetsSection:Button({
-        Name = "Refresh skins list",
-        Callback = function()
-            if API and API.refresh then
-                pcall(API.refresh)
-                safeNotify("Skinchanger", "Refreshed!", "Success")
+    -- 2. Initialize Visual Gun Catalog in Guns Tab
+    if GunCatalog and GunCatalog.init then
+        GunCatalog.init(Tabs.Guns, Config, API, Library, Database)
+    end
+
+    -- 3. Initialize Settings Tab with Reset Buttons
+    local ResetGroup = Tabs.Settings:AddLeftGroupbox("Reset Skins")
+    local MenuConfigGroup = Tabs.Settings:AddRightGroupbox("Menu & State")
+
+    ResetGroup:AddButton({
+        Text = "Reset knife skins to default",
+        Func = function()
+            if API and API.resetKnifeSkins then
+                API.resetKnifeSkins()
+            else
+                Config.KNIFE_MODEL = "Default"
+                Config.KNIFE_SKIN = "Stock"
+                Config.KNIFE_SKINS = {}
+                if Config.queueSave then Config.queueSave() else Config.save() end
+                if API and API.refresh then API.refresh() end
             end
-        end
+            if KnifeCatalog and KnifeCatalog.refresh then
+                pcall(KnifeCatalog.refresh)
+            end
+            Library:Notify("Reset all knife skins to default", 2)
+        end,
+        DoubleClick = false,
+        Tooltip = "Resets your knife model and all custom knife skins to stock appearance"
     })
 
-    UIManager.MainTab = Tab
+    ResetGroup:AddButton({
+        Text = "Reset weapon skins to default",
+        Func = function()
+            if API and API.resetWeaponSkins then
+                API.resetWeaponSkins()
+            else
+                Config.SELECTED_SKINS = {}
+                Config.SKIN_MODE = "Stock"
+                if Config.queueSave then Config.queueSave() else Config.save() end
+                if API and API.refresh then API.refresh() end
+            end
+            if GunCatalog and GunCatalog.refresh then
+                pcall(GunCatalog.refresh)
+            end
+            Library:Notify("Reset all weapon skins to default", 2)
+        end,
+        DoubleClick = false,
+        Tooltip = "Resets all gun and firearm skins to stock appearance"
+    })
+
+    MenuConfigGroup:AddLabel("Toggle UI: Insert / RightShift")
+    MenuConfigGroup:AddButton({
+        Text = "Unload Skinchanger",
+        Func = function()
+            if unloadCallback then
+                unloadCallback()
+            elseif Library and Library.Unload then
+                Library:Unload()
+            end
+        end,
+        DoubleClick = true,
+        Tooltip = "Double-click to unload the skinchanger"
+    })
+
+    -- Focus first tab
+    Tabs.Knife:ShowTab()
 end
 
 function UIManager.cleanup()
-    closePopup()
-    cleanupViewports()
+    if KnifeCatalog and KnifeCatalog.cleanup then
+        pcall(KnifeCatalog.cleanup)
+    end
+    if GunCatalog and GunCatalog.cleanup then
+        pcall(GunCatalog.cleanup)
+    end
+    if UIManager.Library and UIManager.Library.Unload then
+        pcall(function() UIManager.Library:Unload() end)
+    end
     UIManager.Initialized = false
-    UIManager.MainTab = nil
+    UIManager.Library = nil
+    UIManager.Window = nil
+    UIManager.Tabs = {}
 end
-
-function UIManager.show() end
-function UIManager.hide() end
-function UIManager.toggle() end
 
 return UIManager

@@ -1,20 +1,12 @@
--- @Discord_alvin6974. / Bloxstrike Skinchanger / Standalone Engine (arvn-based)
--- If loaded by main cheat, skinchanger is already integrated - skip
-if _G.SkinChanger then
-    print("[Skinchanger] Already loaded by main cheat")
-    return _G.SkinChanger
-end
+-- @Discord_alvin6974. / Bloxstrike Skinchanger / Standalone Engine
+-- Restored to the original architecture: LinoriaLib drives the UI and the
+-- Knife/Gun catalogs render their own 3D viewports. This is the proven
+-- working setup - viewports only appear when the catalogs build them
+-- inside a Linoria tab.
 
--- Cleanup previous instance
 if _G.__alvinSkinChangerJanitor then
     pcall(_G.__alvinSkinChangerJanitor)
     _G.__alvinSkinChangerJanitor = nil
-end
-
--- Use existing arvn instance from main cheat, or create new one if not available
-local Arvn = _G.arvn
-if not Arvn then
-    Arvn = loadstring(game:HttpGet("https://raw.githubusercontent.com/koteqjjjj/arvn/main/arvn.lua"))()
 end
 
 -- Module loader
@@ -66,11 +58,15 @@ local API          = import("API")
 local KnifeCatalog = import("KnifeCatalog")
 local GunCatalog   = import("GunCatalog")
 local GloveCatalog = import("GloveCatalog")
+local LinoriaLib   = import("LinoriaLib")
 local UIManager    = import("UIManager")
 
 -- Bind subsystems
 API.bind(Config, Database, Engine, KnifeCatalog, GunCatalog)
-API.bindGloveCatalog(GloveCatalog)
+if API.bindGloveCatalog then
+    API.bindGloveCatalog(GloveCatalog)
+end
+UIManager.bindCatalogs(KnifeCatalog, GunCatalog)
 
 -- Initialize Engine
 API.init()
@@ -79,15 +75,20 @@ API.init()
 local function cleanup()
     UIManager.cleanup()
     API.cleanup()
+    _G.SkinChanger = nil
     _G.__alvinSkinChangerJanitor = nil
 end
 
--- Initialize UI (creates own window if standalone)
-UIManager.init(Config, Arvn, API, Database, KnifeCatalog, GunCatalog, GloveCatalog, nil)
+-- Initialize UI.
+-- NOTE: LinoriaLib is passed here (NOT the main cheat's arvn instance). The
+-- catalogs call Library:Create / Library:CreateLabel and need Tab.TabFrame,
+-- which only Linoria provides. This is why the 3D previews render correctly
+-- with this setup.
+UIManager.init(Config, LinoriaLib, API, Database, cleanup)
 
 -- Global exports
 _G.SkinChanger = API
 _G.__alvinSkinChangerJanitor = cleanup
 
-print("@Discord_alvin6974. / Bloxstrike Skinchanger / Initialized")
+print("@Discord_alvin6974. / Bloxstrike Skinchanger / Initialized with Visual 3D Catalog")
 return API
