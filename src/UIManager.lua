@@ -1,5 +1,4 @@
--- @Discord_alvin6974. / Bloxstrike Skinchanger / UIManager (image-based skin selector)
-local Arvn = nil
+-- @Discord_alvin6974. / Bloxstrike Skinchanger / UIManager (integrated into main window)
 local API = nil
 local Config = nil
 local Database = nil
@@ -9,165 +8,58 @@ local GloveCatalog = nil
 
 local UIManager = {
     Initialized = false,
-    Window = nil,
-    Visible = false,
-    SkinsLib = nil
+    MainTab = nil,
+    ArvnRef = nil
 }
 
-local RarityColors = {
-    Special   = Color3.fromRGB(255, 215, 0),
-    Forbidden = Color3.fromRGB(255, 140, 0),
-    Red       = Color3.fromRGB(235, 75, 75),
-    Pink      = Color3.fromRGB(211, 44, 230),
-    Purple    = Color3.fromRGB(136, 71, 255),
-    Blue      = Color3.fromRGB(75, 106, 255),
-    Stock     = Color3.fromRGB(150, 155, 165),
-}
-
-local function getRarityColor(name)
-    if name == "Special" or name == "Random" then return RarityColors.Special end
-    if name == "Stock" or name == "Default" or name == "Vanilla" then return RarityColors.Stock end
-    return RarityColors.Blue
+local function safeNotify(title, content, kind)
+    local arvn = UIManager.ArvnRef
+    if arvn and arvn.Notify then
+        pcall(arvn.Notify, arvn, {Title = title, Content = content, Kind = kind or "Info"})
+    end
 end
 
-local function getSkinsLib()
-    if UIManager.SkinsLib then return UIManager.SkinsLib end
-    local ok, lib = pcall(function()
-        return require(game:GetService("ReplicatedStorage").Database.Components.Libraries.Skins)
-    end)
-    if ok and lib then
-        UIManager.SkinsLib = lib
-        return lib
-    end
-    return nil
-end
-
-local function createSkinCard(parent, modelName, skinName, isKnife, rarityColor)
-    local SkinsLib = getSkinsLib()
-    if not SkinsLib then return nil end
-    
-    local card = Instance.new("Frame")
-    card.Name = "SkinCard"
-    card.Size = UDim2.new(0, 120, 0, 140)
-    card.BackgroundColor3 = Color3.fromRGB(30, 30, 35)
-    card.BorderSizePixel = 0
-    card.Parent = parent
-    
-    local corner = Instance.new("UICorner")
-    corner.CornerRadius = UDim.new(0, 6)
-    corner.Parent = card
-    
-    -- Try to load 3D model preview
-    local model = nil
-    local trySkins = { skinName, "Stock", "Vanilla", "Fade" }
-    for _, s in ipairs(trySkins) do
-        if s and s ~= "Random" and s ~= "Special" then
-            local ok, m = pcall(function()
-                return SkinsLib.GetCharacterModel(modelName, s, 0.001)
-            end)
-            if ok and m then
-                model = m
-                break
-            end
-        end
-    end
-    
-    if model then
-        local viewport = Instance.new("ViewportFrame")
-        viewport.Size = UDim2.new(1, -8, 0, 100)
-        viewport.Position = UDim2.new(0, 4, 0, 4)
-        viewport.BackgroundTransparency = 1
-        viewport.Parent = card
-        
-        local clone = model:Clone()
-        clone.Parent = viewport
-        
-        local cf, sz = clone:GetBoundingBox()
-        local maxDim = math.max(sz.X, sz.Y, sz.Z, 0.5)
-        local dist = maxDim * 0.81
-        
-        local camera = Instance.new("Camera")
-        camera.FieldOfView = 50
-        local camPos = cf.Position + Vector3.new(dist * 0.75, dist * 0.35, dist * 0.8)
-        camera.CFrame = CFrame.new(camPos, cf.Position)
-        camera.Parent = viewport
-        viewport.CurrentCamera = camera
-    end
-    
-    -- Skin name label
-    local nameLabel = Instance.new("TextLabel")
-    nameLabel.Size = UDim2.new(1, -8, 0, 20)
-    nameLabel.Position = UDim2.new(0, 4, 0, 104)
-    nameLabel.BackgroundTransparency = 1
-    nameLabel.Text = skinName
-    nameLabel.TextColor3 = rarityColor
-    nameLabel.TextSize = 12
-    nameLabel.Font = Enum.Font.GothamBold
-    nameLabel.TextXAlignment = Enum.TextXAlignment.Center
-    nameLabel.Parent = card
-    
-    -- Model name label
-    local modelLabel = Instance.new("TextLabel")
-    modelLabel.Size = UDim2.new(1, -8, 0, 16)
-    modelLabel.Position = UDim2.new(0, 4, 0, 124)
-    modelLabel.BackgroundTransparency = 1
-    modelLabel.Text = modelName
-    modelLabel.TextColor3 = Color3.fromRGB(140, 140, 150)
-    modelLabel.TextSize = 10
-    modelLabel.Font = Enum.Font.Gotham
-    modelLabel.TextXAlignment = Enum.TextXAlignment.Center
-    modelLabel.Parent = card
-    
-    -- Click to select
-    local clickDetector = Instance.new("TextButton")
-    clickDetector.Size = UDim2.new(1, 0, 1, 0)
-    clickDetector.BackgroundTransparency = 1
-    clickDetector.Text = ""
-    clickDetector.Parent = card
-    
-    clickDetector.MouseButton1Click:Connect(function()
-        if isKnife then
-            Config.KNIFE_MODEL = modelName
-            Config.KNIFE_SKIN = skinName
-            if API and API.setKnife then
-                API.setKnife(modelName, skinName)
-            end
-        else
-            Config.SELECTED_WEAPON_TYPE = modelName
-            if API and API.setWeaponSkin then
-                API.setWeaponSkin(modelName, skinName)
-            end
-        end
-        Arvn:Notify({Title = "Skinchanger", Content = modelName .. " - " .. skinName, Kind = "Success"})
-    end)
-    
-    return card
-end
-
-function UIManager.init(config, arvn, api, database, knifeCatalog, gunCatalog, gloveCatalog)
+function UIManager.init(config, arvn, api, database, knifeCatalog, gunCatalog, gloveCatalog, mainWindow)
     if UIManager.Initialized then return end
     UIManager.Initialized = true
-    
+
     Config = config
-    Arvn = arvn
     API = api
     Database = database
     KnifeCatalog = knifeCatalog
     GunCatalog = gunCatalog
     GloveCatalog = gloveCatalog
+    UIManager.ArvnRef = arvn
 
-    local Window = Arvn:CreateWindow({
-        Title = "Skin Changer",
-        Author = "@Discord_alvin6974.",
-        Folder = "Bloxstrike_Skinchanger"
-    })
-    UIManager.Window = Window
+    -- If mainWindow is nil, create a standalone window
+    local Window = mainWindow
+    if not Window and arvn and arvn.CreateWindow then
+        Window = arvn:CreateWindow({
+            Title = "Skin Changer",
+            Author = "@Discord_alvin6974.",
+            Folder = "Bloxstrike_Skinchanger"
+        })
+    end
 
-    local Main = Window:Group("Main")
+    if not Window then
+        UIManager.Initialized = false
+        return
+    end
+
+    local Main = nil
+    pcall(function()
+        Main = Window:Group("Skinchanger")
+    end)
+    if not Main then
+        UIManager.Initialized = false
+        return
+    end
+
     local Tab = Main:Tab({Name = "Skins", Icon = "palette"})
-    local Section = Tab:Section("Knives")
 
-    -- Knife models
+    -- Knives section
+    local KnivesSection = Tab:Section("Knives")
+
     local knifeNames = {}
     if KnifeCatalog and KnifeCatalog.getNames then
         local ok, list = pcall(function() return KnifeCatalog.getNames() end)
@@ -178,11 +70,32 @@ function UIManager.init(config, arvn, api, database, knifeCatalog, gunCatalog, g
     end
 
     for _, knifeName in ipairs(knifeNames) do
-        local skins = {"Special", "Fade", "Stock", "Vanilla"}
-        for _, skinName in ipairs(skins) do
-            local rarityColor = getRarityColor(skinName)
-            createSkinCard(Section.Container, knifeName, skinName, true, rarityColor)
-        end
+        KnivesSection:Button({
+            Name = knifeName,
+            Callback = function()
+                Config.KNIFE_MODEL = knifeName
+                Config.KNIFE_SKIN = "Special"
+                if API and API.setKnife then
+                    pcall(API.setKnife, knifeName, "Special")
+                end
+                safeNotify("Skinchanger", "Equipped " .. knifeName, "Success")
+            end
+        })
+    end
+
+    -- Knife skins
+    local knifeSkins = {"Special", "Fade", "Stock", "Vanilla"}
+    for _, skinName in ipairs(knifeSkins) do
+        KnivesSection:Button({
+            Name = "  " .. skinName,
+            Callback = function()
+                Config.KNIFE_SKIN = skinName
+                if API and API.setKnife then
+                    pcall(API.setKnife, Config.KNIFE_MODEL or "Butterfly Knife", skinName)
+                end
+                safeNotify("Skinchanger", "Knife skin: " .. skinName, "Success")
+            end
+        })
     end
 
     -- Guns section
@@ -198,77 +111,63 @@ function UIManager.init(config, arvn, api, database, knifeCatalog, gunCatalog, g
     end
 
     for _, gunName in ipairs(gunNames) do
-        local skins = {"Special", "Fade", "Stock", "Vanilla"}
-        for _, skinName in ipairs(skins) do
-            local rarityColor = getRarityColor(skinName)
-            createSkinCard(GunsSection.Container, gunName, skinName, false, rarityColor)
-        end
+        GunsSection:Button({
+            Name = gunName,
+            Callback = function()
+                Config.SELECTED_WEAPON_TYPE = gunName
+                safeNotify("Skinchanger", "Selected " .. gunName, "Success")
+            end
+        })
+    end
+
+    -- Gun skins
+    local gunSkins = {"Special", "Fade", "Stock", "Vanilla"}
+    for _, skinName in ipairs(gunSkins) do
+        GunsSection:Button({
+            Name = "  " .. skinName,
+            Callback = function()
+                if API and API.setWeaponSkin then
+                    pcall(API.setWeaponSkin, Config.SELECTED_WEAPON_TYPE or "AK-47", skinName)
+                end
+                safeNotify("Skinchanger", "Weapon skin: " .. skinName, "Success")
+            end
+        })
     end
 
     -- Presets
     local PresetsSection = Tab:Section({Name = "Presets", Side = "Right"})
 
-    PresetsSection:Button({
-        Name = "All Special",
-        Callback = function()
-            if API and API.setAllSpecial then
-                API.setAllSpecial()
-                Arvn:Notify({Title = "Skinchanger", Content = "All special!", Kind = "Success"})
-            end
-        end
-    })
+    local presets = {
+        {Name = "All Special", Fn = function() return API.setAllSpecial end},
+        {Name = "All Random", Fn = function() return API.setAllRandom end},
+        {Name = "All Default", Fn = function() return API.setAllDefault end},
+        {Name = "Reroll Random", Fn = function() return API.rerollRandom end},
+    }
 
-    PresetsSection:Button({
-        Name = "All Random",
-        Callback = function()
-            if API and API.setAllRandom then
-                API.setAllRandom()
-                Arvn:Notify({Title = "Skinchanger", Content = "Random!", Kind = "Success"})
+    for _, preset in ipairs(presets) do
+        PresetsSection:Button({
+            Name = preset.Name,
+            Callback = function()
+                local fn = preset.Fn()
+                if fn then
+                    pcall(fn)
+                    safeNotify("Skinchanger", preset.Name .. " applied!", "Success")
+                end
             end
-        end
-    })
-
-    PresetsSection:Button({
-        Name = "All Default",
-        Callback = function()
-            if API and API.setAllDefault then
-                API.setAllDefault()
-                Arvn:Notify({Title = "Skinchanger", Content = "Default!", Kind = "Success"})
-            end
-        end
-    })
-
-    PresetsSection:Button({
-        Name = "Reroll",
-        Callback = function()
-            if API and API.rerollRandom then
-                API.rerollRandom()
-                Arvn:Notify({Title = "Skinchanger", Content = "Rerolled!", Kind = "Success"})
-            end
-        end
-    })
-
-    -- Hide by default
-    if Arvn.Toggle then
-        pcall(Arvn.Toggle, Arvn)
+        })
     end
+
+    UIManager.MainTab = Tab
 end
 
 function UIManager.cleanup()
     UIManager.Initialized = false
-    UIManager.Window = nil
+    UIManager.MainTab = nil
 end
 
-function UIManager.show()
-    if Arvn and not Arvn.Toggled then
-        pcall(Arvn.Toggle, Arvn)
-    end
-end
-
-function UIManager.hide()
-    if Arvn and Arvn.Toggled then
-        pcall(Arvn.Toggle, Arvn)
-    end
-end
+-- These are no-ops since the skinchanger shares the main window
+function UIManager.show() end
+function UIManager.hide() end
+function UIManager.toggle() end
 
 return UIManager

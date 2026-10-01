@@ -1,4 +1,10 @@
 -- @Discord_alvin6974. / Bloxstrike Skinchanger / Standalone Engine (arvn-based)
+-- If loaded by main cheat, skinchanger is already integrated - skip
+if _G.SkinChanger then
+    print("[Skinchanger] Already loaded by main cheat")
+    return _G.SkinChanger
+end
+
 -- Cleanup previous instance
 if _G.__alvinSkinChangerJanitor then
     pcall(_G.__alvinSkinChangerJanitor)
@@ -76,12 +82,12 @@ local function cleanup()
     _G.__alvinSkinChangerJanitor = nil
 end
 
--- Initialize UI
-UIManager.init(Config, Arvn, API, Database, KnifeCatalog, GunCatalog, GloveCatalog)
+-- Initialize UI (creates own window if standalone)
+UIManager.init(Config, Arvn, API, Database, KnifeCatalog, GunCatalog, GloveCatalog, nil)
 
 -- Global exports
 _G.SkinChanger = API
 _G.__alvinSkinChangerJanitor = cleanup
 
-print("@Discord_alvin6974. / Bloxstrike Skinchanger / Initialized with Visual 3D Catalog")
+print("@Discord_alvin6974. / Bloxstrike Skinchanger / Initialized")
 return API
