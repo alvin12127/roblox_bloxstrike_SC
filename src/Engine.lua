@@ -403,6 +403,108 @@ end
 local originalWeaponNew = nil
 local originalGetCameraModel = nil
 local originalGetCharacterModel = nil
+local originalGetGloves = nil
+
+-- the live loadout table, found through the inventory controller's upvalues.
+-- It holds the real gloves item, which is what has to change for a glove swap to
+-- show up without waiting for a re-equip.
+local function getActiveLoadout()
+    if not InventoryController then
+        pcall(function()
+            InventoryController = require(ReplicatedStorage.Controllers.InventoryController)
+        end)
+    end
+
+    if not InventoryController then return nil end
+
+    local getUp = getupvalues or debug.getupvalues
+    if type(getUp) ~= "function" then return nil end
+
+    for _, fnName in ipairs({ "getCurrentInventory", "getCurrentEquipped", "getInventorySlot" }) do
+        local fn = InventoryController[fnName]
+
+        if type(fn) == "function" then
+            local ok, upvalues = pcall(getUp, fn)
+
+            if ok and type(upvalues) == "table" then
+                for _, upvalue in pairs(upvalues) do
+                    if type(upvalue) == "table" and rawget(upvalue, "Inventory") then
+                        return upvalue
+                    end
+                end
+            end
+        end
+    end
+
+    return nil
+end
+
+-- swaps the gloves on the live inventory entry and rebuilds the pair hanging off
+-- the equipped viewmodel, so the change is visible right away
+function Engine.applyGlove(cfg)
+    local glovesEnabled = (cfg.ENABLED ~= false and cfg.GLOVE_SKINS_ENABLED ~= false)
+    if not glovesEnabled then return end
+
+    local model = cfg.GLOVE_MODEL
+    if type(model) ~= "string" or model == "" or model == "Default" then return end
+
+    local skin = cfg.GLOVE_SKIN or "Stock"
+    local loadout = getActiveLoadout()
+
+    if (not loadout) or (not loadout.Inventory) then return end
+
+    local slot = loadout.Inventory[7] or loadout.Inventory[6] or loadout.Inventory["Gloves"]
+    if (not slot) or (not slot._items) or (not slot._items[1]) then return end
+
+    local item = slot._items[1]
+
+    if item.Name == model and item.Skin == skin then return end
+
+    pcall(function()
+        item.Name = model
+        item.Skin = skin
+
+        if GetWeaponProperties then
+            item.Properties = GetWeaponProperties(model) or item.Properties
+        end
+    end)
+
+    local equipped = loadout.CurrentEquipped
+    local viewmodel = equipped and equipped.Viewmodel
+
+    if viewmodel then
+        pcall(function()
+            if viewmodel.Gloves then
+                viewmodel.Gloves:Destroy()
+                viewmodel.Gloves = nil
+            end
+
+            if not SkinsLib then return end
+
+            -- bypass our own hook, the target model is already resolved here
+            local previousBypass = _G.__gloveCatalogPreview
+            _G.__gloveCatalogPreview = true
+
+            local newGloves = SkinsLib.GetGloves(model, skin, 0)
+
+            _G.__gloveCatalogPreview = previousBypass
+
+            if newGloves then
+                if viewmodel.Model then
+                    newGloves.Parent = viewmodel.Model
+                end
+
+                viewmodel.Gloves = newGloves
+            end
+        end)
+    end
+
+    pcall(function()
+        if InventoryController and InventoryController.OnInventoryChanged then
+            InventoryController.OnInventoryChanged:Fire(loadout.Inventory)
+        end
+    end)
+end
 
 function Engine.init(cfg, db)
     Config = cfg
@@ -425,6 +527,13 @@ function Engine.init(cfg, db)
         _G.__originalGetCharacterModel = SkinsLib.GetCharacterModel
     end
     originalGetCharacterModel = _G.__originalGetCharacterModel
+
+    if type(SkinsLib.GetGloves) == "function" then
+        if not _G.__originalGetGloves then
+            _G.__originalGetGloves = SkinsLib.GetGloves
+        end
+        originalGetGloves = _G.__originalGetGloves
+    end
 
     -- Knife component hook
     WeaponComponent.new = function(p1, p2, p3, p4, p5, p6, p7, p8, p9, p10, p11, p12, ...)
@@ -468,6 +577,41 @@ function Engine.init(cfg, db)
         return originalGetCharacterModel(weaponName, skinName, float, statTrack, nameTag, charm, stickers, team)
     end
 
+    -- Glove model hook: every glove model goes through this one call, so
+    -- redirecting it is enough to swap the model wherever gloves are built
+    if type(originalGetGloves) == "function" then
+        SkinsLib.GetGloves = function(gloveName, skinName, float)
+            -- the catalog renders previews through this same call, those must
+            -- show the glove on the card and not the equipped one
+            if _G.__gloveCatalogPreview then
+                return originalGetGloves(gloveName, skinName, float)
+            end
+
+            local glovesEnabled = (Config.ENABLED ~= false and Config.GLOVE_SKINS_ENABLED ~= false)
+
+            if not glovesEnabled or not isViewingLocalPlayer() then
+                return originalGetGloves(gloveName, skinName, float)
+            end
+
+            if Database.isGlove(gloveName) then
+                local targetModel = Config.GLOVE_MODEL
+
+                if type(targetModel) == "string" and targetModel ~= "" and targetModel ~= "Default" then
+                    local ok, model = pcall(originalGetGloves, targetModel, Config.GLOVE_SKIN or "Stock", float)
+
+                    if ok and model then
+                        if typeof(model) == "Instance" then
+                            model.Name = targetModel
+                        end
+                        return model
+                    end
+                end
+            end
+
+            return originalGetGloves(gloveName, skinName, float)
+        end
+    end
+
     -- Real-time gun texture hook on camera child added
     local cameraConn = Camera.ChildAdded:Connect(function(child)
         local weaponEnabled = (Config.ENABLED ~= false and Config.WEAPON_SKINS_ENABLED ~= false)
@@ -498,6 +642,7 @@ function Engine.init(cfg, db)
         task.delay(0.25, function()
             if Config.ENABLED ~= false then
                 Engine.refreshActiveViewmodels(Config)
+                Engine.applyGlove(Config)
             end
         end)
     end
@@ -534,12 +679,18 @@ function Engine.cleanup()
         SkinsLib.GetCharacterModel = originalGetCharacterModel
     end
 
+    if originalGetGloves then
+        SkinsLib.GetGloves = originalGetGloves
+    end
+
     originalWeaponNew = nil
     originalGetCameraModel = nil
     originalGetCharacterModel = nil
+    originalGetGloves = nil
     _G.__originalWeaponComponentNew = nil
     _G.__originalGetCameraModel = nil
     _G.__originalGetCharacterModel = nil
+    _G.__originalGetGloves = nil
     Engine.RandomCache = {}
     Engine.Initialized = false
 end

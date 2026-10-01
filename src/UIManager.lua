@@ -2,6 +2,7 @@
 local Database = nil
 local KnifeCatalog = nil
 local GunCatalog = nil
+local GloveCatalog = nil
 
 local function getDatabase()
     if Database then return Database end
@@ -119,6 +120,10 @@ function UIManager.bindCatalogs(kc, gc)
     GunCatalog = gc
 end
 
+function UIManager.bindGloveCatalog(gc)
+    if gc then GloveCatalog = gc end
+end
+
 function UIManager.init(Config, Library, API, Db, unloadCallback)
     if type(API) == "function" and Db == nil then
         unloadCallback = API
@@ -174,10 +179,11 @@ function UIManager.init(Config, Library, API, Db, unloadCallback)
     })
     UIManager.Window = Window
 
-    -- Add Tabs: Knife, Guns, Settings
+    -- Add Tabs: Knife, Guns, Gloves, Settings
     local Tabs = {
         Knife = Window:AddTab("Knife"),
         Guns = Window:AddTab("Guns"),
+        Gloves = Window:AddTab("Gloves"),
         Settings = Window:AddTab("Settings")
     }
     UIManager.Tabs = Tabs
@@ -190,6 +196,11 @@ function UIManager.init(Config, Library, API, Db, unloadCallback)
     -- 2. Initialize Visual Gun Catalog in Guns Tab
     if GunCatalog and GunCatalog.init then
         GunCatalog.init(Tabs.Guns, Config, API, Library, Database)
+    end
+
+    -- 2b. Initialize Visual Glove Catalog in Gloves Tab
+    if GloveCatalog and GloveCatalog.init then
+        GloveCatalog.init(Tabs.Gloves, Config, API, Library, Database)
     end
 
     -- 3. Initialize Settings Tab with Reset Buttons
@@ -237,6 +248,25 @@ function UIManager.init(Config, Library, API, Db, unloadCallback)
         Tooltip = "Resets all gun and firearm skins to stock appearance"
     })
 
+    ResetGroup:AddButton({
+        Text = "Reset glove skins to default",
+        Func = function()
+            if API and API.resetGloveSkins then
+                API.resetGloveSkins()
+            else
+                Config.GLOVE_MODEL = "Default"
+                Config.GLOVE_SKIN = "Stock"
+                if Config.queueSave then Config.queueSave() else Config.save() end
+            end
+            if GloveCatalog and GloveCatalog.refresh then
+                pcall(GloveCatalog.refresh)
+            end
+            Library:Notify("Reset gloves to the default pair", 2)
+        end,
+        DoubleClick = false,
+        Tooltip = "Resets your equipped gloves back to the default pair"
+    })
+
     MenuConfigGroup:AddLabel("Toggle UI: Insert / RightShift")
     MenuConfigGroup:AddButton({
         Text = "Unload Skinchanger",
@@ -261,6 +291,9 @@ function UIManager.cleanup()
     end
     if GunCatalog and GunCatalog.cleanup then
         pcall(GunCatalog.cleanup)
+    end
+    if GloveCatalog and GloveCatalog.cleanup then
+        pcall(GloveCatalog.cleanup)
     end
     if UIManager.Library and UIManager.Library.Unload then
         pcall(function() UIManager.Library:Unload() end)

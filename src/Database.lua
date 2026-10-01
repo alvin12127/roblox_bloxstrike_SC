@@ -17,6 +17,16 @@ Database.KnifeModels = {
     "T Knife"
 }
 
+Database.GloveModels = {
+    "Default",
+    "Hand Wraps",
+    "Driver Gloves",
+    "Operator Gloves",
+    "Sports Gloves",
+    "CT Glove",
+    "T Glove"
+}
+
 Database.WeaponTypes = {
     "AK-47", "AUG", "AWP", "Desert Eagle", "Dual Berettas",
     "FAMAS", "Five-SeveN", "Galil AR", "Glock-18", "M4A1-S",
@@ -96,6 +106,52 @@ function Database.isKnife(weaponName)
         return true
     end
     return false
+end
+
+function Database.isGlove(weaponName)
+    if typeof(weaponName) ~= "string" then return false end
+
+    local lower = weaponName:lower()
+
+    if lower == "hand wraps" then return true end
+
+    for _, glove in ipairs(Database.GloveModels) do
+        if lower == glove:lower() then return true end
+    end
+
+    return lower:find("glove", 1, true) ~= nil
+end
+
+function Database.getGloveSkinList(gloveModel)
+    if not gloveModel or gloveModel == "Default" then
+        return { "Default" }
+    end
+
+    local list = { "Special", "Random", "Stock" }
+    local skinsFolder = Database.getSkinsFolder()
+    local folder = skinsFolder and skinsFolder:FindFirstChild(gloveModel)
+
+    if folder then
+        local names = {}
+
+        for _, child in ipairs(folder:GetChildren()) do
+            if child.Name ~= "Stock" and child.Name ~= "Vanilla"
+                and not child.Name:find("PATTERN") then
+
+                table.insert(names, child.Name)
+            end
+        end
+
+        table.sort(names, function(a, b)
+            return a:lower() < b:lower()
+        end)
+
+        for _, name in ipairs(names) do
+            table.insert(list, name)
+        end
+    end
+
+    return list
 end
 
 function Database.isExemptUtility(weaponName)

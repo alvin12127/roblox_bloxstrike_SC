@@ -17,6 +17,11 @@ local Config = {
     SELECTED_WEAPON_TYPE = "AK-47",
     SELECTED_SKINS = {}, -- [weaponName] = "SkinName" or { Skin = "SkinName", Wear = "Factory New" }
 
+    -- Glove Customization
+    GLOVE_SKINS_ENABLED = true,
+    GLOVE_MODEL = "Default",
+    GLOVE_SKIN = "Stock",
+
     -- Keybinds & UI State
     TOGGLE_UI_KEY = Enum.KeyCode.Insert,
     UNLOAD_KEY = Enum.KeyCode.K,
@@ -39,6 +44,9 @@ function Config.reset()
     Config.SKIN_MODE = "Stock"
     Config.SELECTED_WEAPON_TYPE = "AK-47"
     Config.SELECTED_SKINS = {}
+    Config.GLOVE_SKINS_ENABLED = true
+    Config.GLOVE_MODEL = "Default"
+    Config.GLOVE_SKIN = "Stock"
     Config.WINDOW_SIZE_X = 520
     Config.WINDOW_SIZE_Y = 420
     Config.save()
@@ -67,6 +75,9 @@ function Config.save()
         SKIN_MODE = Config.SKIN_MODE,
         SELECTED_WEAPON_TYPE = Config.SELECTED_WEAPON_TYPE,
         SELECTED_SKINS = Config.SELECTED_SKINS,
+        GLOVE_SKINS_ENABLED = Config.GLOVE_SKINS_ENABLED,
+        GLOVE_MODEL = Config.GLOVE_MODEL,
+        GLOVE_SKIN = Config.GLOVE_SKIN,
         WINDOW_SIZE_X = Config.WINDOW_SIZE_X or 440,
         WINDOW_SIZE_Y = Config.WINDOW_SIZE_Y or 210,
         TOGGLE_UI_KEY = Config.TOGGLE_UI_KEY and Config.TOGGLE_UI_KEY.Name or "Insert",
@@ -108,6 +119,15 @@ function Config.load()
                 if data.SELECTED_WEAPON_TYPE ~= nil then Config.SELECTED_WEAPON_TYPE = tostring(data.SELECTED_WEAPON_TYPE) end
                 if type(data.SELECTED_SKINS) == "table" then
                     Config.SELECTED_SKINS = data.SELECTED_SKINS
+                end
+                if data.GLOVE_SKINS_ENABLED ~= nil then
+                    Config.GLOVE_SKINS_ENABLED = (data.GLOVE_SKINS_ENABLED == true)
+                end
+                if data.GLOVE_MODEL ~= nil then
+                    Config.GLOVE_MODEL = tostring(data.GLOVE_MODEL)
+                end
+                if data.GLOVE_SKIN ~= nil then
+                    Config.GLOVE_SKIN = tostring(data.GLOVE_SKIN)
                 end
                 if data.WINDOW_SIZE_X and tonumber(data.WINDOW_SIZE_X) then
                     Config.WINDOW_SIZE_X = tonumber(data.WINDOW_SIZE_X)

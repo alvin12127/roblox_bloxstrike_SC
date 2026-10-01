@@ -6,6 +6,7 @@ local Database = nil
 local Engine = nil
 local KnifeCatalog = nil
 local GunCatalog = nil
+local GloveCatalog = nil
 
 function API.bind(cfg, db, eng, kc, gc)
     Config = cfg
@@ -18,6 +19,10 @@ end
 function API.bindCatalogs(kc, gc)
     KnifeCatalog = kc
     GunCatalog = gc
+end
+
+function API.bindGloveCatalog(gc)
+    if gc then GloveCatalog = gc end
 end
 
 -- Core lifecycle
@@ -84,6 +89,35 @@ end
 
 function API.setKnifeSkin(skin)
     API.setKnife(nil, skin)
+end
+
+-- Glove configuration
+function API.setGloveEnabled(enabled)
+    Config.GLOVE_SKINS_ENABLED = (enabled ~= false)
+    Config.save()
+    Engine.applyGlove(Config)
+end
+
+function API.setGlove(model, skin)
+    if model then
+        Config.GLOVE_MODEL = model
+        if skin then
+            Config.GLOVE_SKIN = skin
+        end
+    elseif skin then
+        Config.GLOVE_SKIN = skin
+    end
+
+    Config.save()
+    Engine.applyGlove(Config)
+end
+
+function API.setGloveModel(model)
+    API.setGlove(model, nil)
+end
+
+function API.setGloveSkin(skin)
+    API.setGlove(nil, skin)
 end
 
 -- Weapon configuration
@@ -168,6 +202,14 @@ function API.getWeaponSkins(weaponName)
     return Database.getWeaponSkinList(weaponName or Config.SELECTED_WEAPON_TYPE)
 end
 
+function API.getGloveList()
+    return Database.GloveModels
+end
+
+function API.getGloveSkins(gloveModel)
+    return Database.getGloveSkinList(gloveModel or Config.GLOVE_MODEL)
+end
+
 function API.save()
     Config.save()
 end
@@ -197,6 +239,16 @@ function API.resetWeaponSkins()
     end
 end
 
+function API.resetGloveSkins()
+    Config.GLOVE_MODEL = "Default"
+    Config.GLOVE_SKIN = "Stock"
+    Config.save()
+    Engine.applyGlove(Config)
+    if GloveCatalog and GloveCatalog.refresh then
+        pcall(GloveCatalog.refresh)
+    end
+end
+
 function API.reset()
     Config.reset()
     Config.save()
@@ -206,6 +258,9 @@ function API.reset()
     end
     if GunCatalog and GunCatalog.refresh then
         pcall(GunCatalog.refresh)
+    end
+    if GloveCatalog and GloveCatalog.refresh then
+        pcall(GloveCatalog.refresh)
     end
 end
 
