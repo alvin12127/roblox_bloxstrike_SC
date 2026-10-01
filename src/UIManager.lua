@@ -46,24 +46,57 @@ local function renderModelInViewport(vp, modelName, skinName)
     if not vp then return end
     vp:ClearAllChildren()
 
-    local lib = getSkinsLib()
-    if not lib then return end
+    -- Placeholder label while loading / on failure
+    local ph = Instance.new("TextLabel")
+    ph.Size = UDim2.fromScale(1, 1)
+    ph.BackgroundTransparency = 1
+    ph.Text = "..."
+    ph.TextColor3 = Color3.fromRGB(160, 160, 170)
+    ph.Font = Enum.Font.Gotham
+    ph.TextSize = 12
+    ph.ZIndex = 504
+    ph.Parent = vp
 
+    local lib = getSkinsLib()
+    if not lib then
+        ph.Text = "No SkinsLib"
+        return
+    end
+
+    -- Knives: "Default" maps to "CT Knife" (same as original catalogs)
+    local targetModel = modelName
+    if targetModel == "Default" then
+        targetModel = "CT Knife"
+    end
+
+    -- Try the requested skin first, then a broad fallback list
     local model = nil
-    local trySkins = {skinName, "Stock", "Vanilla", "Fade"}
+    local trySkins = {skinName, "Stock", "Vanilla", "Fade", "Midas", "Lore", "Ren", "Lebron James"}
     for _, s in ipairs(trySkins) do
         if s and s ~= "Random" and s ~= "Special" and s ~= "Default" then
             local ok, m = pcall(function()
-                return lib.GetCharacterModel(modelName, s, 0.001)
+                return lib.GetCharacterModel(targetModel, s, 0.001)
             end)
-            if ok and m then model = m break end
+            if ok and m then
+                model = m
+                break
+            end
         end
     end
 
     if not model then
-        pcall(function() model = lib.GetCharacterModel(modelName, "Stock", 0.001) end)
+        pcall(function()
+            model = lib.GetCharacterModel(targetModel, "Stock", 0.001)
+        end)
     end
-    if not model then return end
+
+    if not model then
+        ph.Text = "No model"
+        return
+    end
+
+    -- Remove placeholder once we have a model
+    ph:Destroy()
 
     local clone = nil
     local ok, res = pcall(function() return model:Clone() end)
@@ -84,6 +117,7 @@ local function renderModelInViewport(vp, modelName, skinName)
     vp.CurrentCamera = cam
     vp.LightColor = Color3.fromRGB(245, 245, 255)
     vp.Ambient = Color3.fromRGB(150, 150, 160)
+    vp.LightDirection = Vector3.new(-1, -1.2, -1).Unit
 end
 
 -- Close the popup
