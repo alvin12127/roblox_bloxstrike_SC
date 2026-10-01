@@ -67,6 +67,9 @@ if API.bindGloveCatalog then
     API.bindGloveCatalog(GloveCatalog)
 end
 UIManager.bindCatalogs(KnifeCatalog, GunCatalog)
+if UIManager.bindGloveCatalog then
+    UIManager.bindGloveCatalog(GloveCatalog)
+end
 
 -- Initialize Engine
 API.init()

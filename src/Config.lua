@@ -25,8 +25,18 @@ local Config = {
     -- Keybinds & UI State
     TOGGLE_UI_KEY = Enum.KeyCode.Insert,
     UNLOAD_KEY = Enum.KeyCode.K,
-    WINDOW_SIZE_X = 520,
-    WINDOW_SIZE_Y = 420,
+    WINDOW_SIZE_X = 720,
+    WINDOW_SIZE_Y = 520,
+
+    -- Theme (lavender, kept identical to the main cheat so both UIs match)
+    UI_THEME = {
+        FontColor       = Color3.fromRGB(250, 250, 250),
+        MainColor       = Color3.fromRGB(30, 26, 42),
+        BackgroundColor = Color3.fromRGB(21, 18, 32),
+        AccentColor     = Color3.fromRGB(186, 140, 255),
+        OutlineColor    = Color3.fromRGB(58, 50, 76),
+        RiskColor       = Color3.fromRGB(255, 60, 60)
+    },
 
     -- Persistence
     SAVE_FILE = "Bloxstrike_Skinchanger.json"
@@ -47,8 +57,8 @@ function Config.reset()
     Config.GLOVE_SKINS_ENABLED = true
     Config.GLOVE_MODEL = "Default"
     Config.GLOVE_SKIN = "Stock"
-    Config.WINDOW_SIZE_X = 520
-    Config.WINDOW_SIZE_Y = 420
+    Config.WINDOW_SIZE_X = 720
+    Config.WINDOW_SIZE_Y = 520
     Config.save()
 end
 
@@ -78,8 +88,8 @@ function Config.save()
         GLOVE_SKINS_ENABLED = Config.GLOVE_SKINS_ENABLED,
         GLOVE_MODEL = Config.GLOVE_MODEL,
         GLOVE_SKIN = Config.GLOVE_SKIN,
-        WINDOW_SIZE_X = Config.WINDOW_SIZE_X or 440,
-        WINDOW_SIZE_Y = Config.WINDOW_SIZE_Y or 210,
+        WINDOW_SIZE_X = Config.WINDOW_SIZE_X or 720,
+        WINDOW_SIZE_Y = Config.WINDOW_SIZE_Y or 520,
         TOGGLE_UI_KEY = Config.TOGGLE_UI_KEY and Config.TOGGLE_UI_KEY.Name or "Insert",
         UNLOAD_KEY = Config.UNLOAD_KEY and Config.UNLOAD_KEY.Name or "K"
     }

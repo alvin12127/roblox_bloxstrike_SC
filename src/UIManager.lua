@@ -1,13 +1,14 @@
--- Seeto.Solutionz / Bloxstrike Skinchanger / UIManager
+-- @Discord_alvin6974. / Bloxstrike Skinchanger / UIManager
 local Database = nil
 local KnifeCatalog = nil
 local GunCatalog = nil
+local GloveCatalog = nil
 
 local function getDatabase()
     if Database then return Database end
     if type(readfile) == "function" then
         local paths = {
-            "Seeto.Solutionz-Bloxstrike-Skinchanger/src/Database.lua",
+            "roblox_bloxstrike_SC/src/Database.lua",
             "Bloxstrike-Skinchanger/src/Database.lua",
             "src/Database.lua",
             "Database.lua"
@@ -24,7 +25,7 @@ local function getDatabase()
         end
     end
     local okHttp, content = pcall(function()
-        return game:HttpGet("https://raw.githubusercontent.com/euphonee/Seeto.Solutionz-Bloxstrike-Skinchanger/main/src/Database.lua?t=" .. tostring(os.time()))
+        return game:HttpGet("https://raw.githubusercontent.com/alvin12127/roblox_bloxstrike_SC/main/src/Database.lua?t=" .. tostring(os.time()))
     end)
     if okHttp and content then
         local fn = loadstring(content)
@@ -40,7 +41,7 @@ local function getKnifeCatalog()
     if KnifeCatalog then return KnifeCatalog end
     if type(readfile) == "function" then
         local paths = {
-            "Seeto.Solutionz-Bloxstrike-Skinchanger/src/KnifeCatalog.lua",
+            "roblox_bloxstrike_SC/src/KnifeCatalog.lua",
             "Bloxstrike-Skinchanger/src/KnifeCatalog.lua",
             "src/KnifeCatalog.lua",
             "KnifeCatalog.lua"
@@ -57,7 +58,7 @@ local function getKnifeCatalog()
         end
     end
     local okHttp, content = pcall(function()
-        return game:HttpGet("https://raw.githubusercontent.com/euphonee/Seeto.Solutionz-Bloxstrike-Skinchanger/main/src/KnifeCatalog.lua?t=" .. tostring(os.time()))
+        return game:HttpGet("https://raw.githubusercontent.com/alvin12127/roblox_bloxstrike_SC/main/src/KnifeCatalog.lua?t=" .. tostring(os.time()))
     end)
     if okHttp and content then
         local fn = loadstring(content)
@@ -73,7 +74,7 @@ local function getGunCatalog()
     if GunCatalog then return GunCatalog end
     if type(readfile) == "function" then
         local paths = {
-            "Seeto.Solutionz-Bloxstrike-Skinchanger/src/GunCatalog.lua",
+            "roblox_bloxstrike_SC/src/GunCatalog.lua",
             "Bloxstrike-Skinchanger/src/GunCatalog.lua",
             "src/GunCatalog.lua",
             "GunCatalog.lua"
@@ -90,7 +91,7 @@ local function getGunCatalog()
         end
     end
     local okHttp, content = pcall(function()
-        return game:HttpGet("https://raw.githubusercontent.com/euphonee/Seeto.Solutionz-Bloxstrike-Skinchanger/main/src/GunCatalog.lua?t=" .. tostring(os.time()))
+        return game:HttpGet("https://raw.githubusercontent.com/alvin12127/roblox_bloxstrike_SC/main/src/GunCatalog.lua?t=" .. tostring(os.time()))
     end)
     if okHttp and content then
         local fn = loadstring(content)
@@ -117,6 +118,10 @@ end
 function UIManager.bindCatalogs(kc, gc)
     KnifeCatalog = kc
     GunCatalog = gc
+end
+
+function UIManager.bindGloveCatalog(gc)
+    GloveCatalog = gc
 end
 
 function UIManager.init(Config, Library, API, Db, unloadCallback)
@@ -153,7 +158,7 @@ function UIManager.init(Config, Library, API, Db, unloadCallback)
     if defaultH < 340 then defaultH = 390 end
 
     local Window = Library:CreateWindow({
-        Title = "Seeto.SolutionZ / Bloxstrike Skinchanger",
+        Title = "@Discord_alvin6974. / Bloxstrike / Skin Changer",
         Center = true,
         AutoShow = true,
         TabPadding = 6,
@@ -174,15 +179,16 @@ function UIManager.init(Config, Library, API, Db, unloadCallback)
     })
     UIManager.Window = Window
 
-    -- Add Tabs: Knife, Guns, Settings
+    -- Add Tabs: Knives, Guns, Gloves, Settings
     local Tabs = {
-        Knife = Window:AddTab("Knife"),
+        Knife = Window:AddTab("Knives"),
         Guns = Window:AddTab("Guns"),
+        Gloves = Window:AddTab("Gloves"),
         Settings = Window:AddTab("Settings")
     }
     UIManager.Tabs = Tabs
 
-    -- 1. Initialize Visual Knife Catalog in Knife Tab
+    -- 1. Initialize Visual Knife Catalog in Knives Tab
     if KnifeCatalog and KnifeCatalog.init then
         KnifeCatalog.init(Tabs.Knife, Config, API, Library, Database)
     end
@@ -192,7 +198,12 @@ function UIManager.init(Config, Library, API, Db, unloadCallback)
         GunCatalog.init(Tabs.Guns, Config, API, Library, Database)
     end
 
-    -- 3. Initialize Settings Tab with Reset Buttons
+    -- 3. Initialize Visual Glove Catalog in Gloves Tab
+    if GloveCatalog and GloveCatalog.init then
+        GloveCatalog.init(Tabs.Gloves, Config, API, Library, Database)
+    end
+
+    -- 4. Initialize Settings Tab with Reset Buttons
     local ResetGroup = Tabs.Settings:AddLeftGroupbox("Reset Skins")
     local MenuConfigGroup = Tabs.Settings:AddRightGroupbox("Menu & State")
 
@@ -237,6 +248,22 @@ function UIManager.init(Config, Library, API, Db, unloadCallback)
         Tooltip = "Resets all gun and firearm skins to stock appearance"
     })
 
+    ResetGroup:AddButton({
+        Text = "Reset glove skins to default",
+        Func = function()
+            Config.GLOVE_MODEL = "Default"
+            Config.GLOVE_SKIN = "Stock"
+            if Config.queueSave then Config.queueSave() else Config.save() end
+            if API and API.refresh then API.refresh() end
+            if GloveCatalog and GloveCatalog.refresh then
+                pcall(GloveCatalog.refresh)
+            end
+            Library:Notify("Reset all glove skins to default", 2)
+        end,
+        DoubleClick = false,
+        Tooltip = "Resets glove model and skin to stock appearance"
+    })
+
     MenuConfigGroup:AddLabel("Toggle UI: Insert / RightShift")
     MenuConfigGroup:AddButton({
         Text = "Unload Skinchanger",
@@ -261,6 +288,9 @@ function UIManager.cleanup()
     end
     if GunCatalog and GunCatalog.cleanup then
         pcall(GunCatalog.cleanup)
+    end
+    if GloveCatalog and GloveCatalog.cleanup then
+        pcall(GloveCatalog.cleanup)
     end
     if UIManager.Library and UIManager.Library.Unload then
         pcall(function() UIManager.Library:Unload() end)
