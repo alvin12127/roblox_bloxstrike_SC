@@ -55,12 +55,15 @@ local Engine       = import("Engine")
 local API          = import("API")
 local KnifeCatalog = import("KnifeCatalog")
 local GunCatalog   = import("GunCatalog")
+local GloveCatalog = import("GloveCatalog")
 local LinoriaLib   = import("LinoriaLib")
 local UIManager    = import("UIManager")
 
 -- Bind subsystems
 API.bind(Config, Database, Engine, KnifeCatalog, GunCatalog)
 UIManager.bindCatalogs(KnifeCatalog, GunCatalog)
+UIManager.bindGloveCatalog(GloveCatalog)
+API.bindGloveCatalog(GloveCatalog)
 
 -- Initialize Engine
 API.init()
@@ -69,7 +72,6 @@ API.init()
 local function cleanup()
     UIManager.cleanup()
     API.cleanup()
-    _G.SkinChanger = nil
     _G.__alvinSkinChangerJanitor = nil
 end
 
