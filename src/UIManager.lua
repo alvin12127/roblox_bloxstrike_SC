@@ -19,6 +19,7 @@ local UIManager = {
     CurrentCategory = "Knives",
     CurrentWeapon = nil,
     Popup = nil,
+    PopupOverlay = nil,
     ViewportCleanups = {}
 }
 
@@ -143,9 +144,13 @@ local function renderModelInViewport(vp, modelName, skinName)
     end)
 end
 
--- Close the popup
+-- Close the popup (and its dim overlay)
 local function closePopup()
     cleanupViewports()
+    if UIManager.PopupOverlay then
+        pcall(function() UIManager.PopupOverlay:Destroy() end)
+        UIManager.PopupOverlay = nil
+    end
     if UIManager.Popup then
         pcall(function() UIManager.Popup:Destroy() end)
         UIManager.Popup = nil
@@ -228,6 +233,22 @@ local function openPopup(category, weaponName)
         skins = {"Special", "Fade", "Stock", "Vanilla"}
     end
 
+    -- Dim overlay behind the popup. Clicking anywhere on it closes the
+    -- browser, so the popup can never get stuck on screen.
+    local overlay = Instance.new("TextButton")
+    overlay.Name = "SkinBrowserOverlay"
+    overlay.Size = UDim2.fromScale(1, 1)
+    overlay.Position = UDim2.fromScale(0, 0)
+    overlay.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+    overlay.BackgroundTransparency = 0.5
+    overlay.BorderSizePixel = 0
+    overlay.Text = ""
+    overlay.ZIndex = 499
+    overlay.Parent = screenGui
+    overlay.MouseButton1Click:Connect(function()
+        closePopup()
+    end)
+
     -- Popup frame
     local popup = Instance.new("Frame")
     popup.Name = "SkinBrowserPopup"
@@ -238,6 +259,9 @@ local function openPopup(category, weaponName)
     popup.BorderSizePixel = 0
     popup.ZIndex = 500
     popup.Parent = screenGui
+
+    -- Track the overlay so cleanup removes both
+    UIManager.PopupOverlay = overlay
 
     Instance.new("UICorner", popup).CornerRadius = UDim.new(0, 10)
 
@@ -278,7 +302,8 @@ local function openPopup(category, weaponName)
     closeBtn.Parent = header
     closeBtn.MouseButton1Click:Connect(closePopup)
 
-    -- Scrolling grid
+    -- Scrolling grid. AutomaticCanvasSize is required - a zero CanvasSize
+    -- is why the grid content never appeared inside the popup.
     local scroll = Instance.new("ScrollingFrame")
     scroll.Size = UDim2.new(1, -16, 1, -48)
     scroll.Position = UDim2.fromOffset(8, 42)
@@ -286,19 +311,16 @@ local function openPopup(category, weaponName)
     scroll.BorderSizePixel = 0
     scroll.ScrollBarThickness = 3
     scroll.ScrollBarImageColor3 = Color3.fromRGB(186, 140, 255)
+    scroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+    scroll.CanvasSize = UDim2.new(0, 0, 0, 0)
     scroll.ZIndex = 501
     scroll.Parent = popup
-    scroll.CanvasSize = UDim2.new(0, 0, 0, 0)
 
     local grid = Instance.new("UIGridLayout")
     grid.CellSize = UDim2.fromOffset(130, 150)
     grid.CellPadding = UDim2.fromOffset(8, 8)
     grid.SortOrder = Enum.SortOrder.LayoutOrder
     grid.Parent = scroll
-
-    grid:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
-        scroll.CanvasSize = UDim2.fromOffset(0, grid.AbsoluteContentSize.Y + 10)
-    end)
 
     -- Rarity colors
     local rarityColors = {
@@ -314,6 +336,7 @@ local function openPopup(category, weaponName)
 
         local card = Instance.new("TextButton")
         card.Name = "Skin_" .. idx
+        card.Size = UDim2.fromOffset(130, 150)
         card.BackgroundColor3 = Color3.fromRGB(30, 30, 35)
         card.BorderSizePixel = 0
         card.Text = ""
