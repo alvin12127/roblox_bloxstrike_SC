@@ -1,11 +1,12 @@
--- @Discord_alvin6974. / Bloxstrike Skinchanger / Standalone Engine
--- NOTE: raw URL은 본인 저장소 기준으로 완전 교체됨 (원본 fallback 없음)
-
+-- @Discord_alvin6974. / Bloxstrike Skinchanger / Standalone Engine (arvn-based)
 -- Cleanup previous instance
 if _G.__alvinSkinChangerJanitor then
     pcall(_G.__alvinSkinChangerJanitor)
     _G.__alvinSkinChangerJanitor = nil
 end
+
+-- Load arvn UI library
+local Arvn = loadstring(game:HttpGet("https://raw.githubusercontent.com/koteqjjjj/arvn/main/arvn.lua"))()
 
 -- Module loader
 local modules = {}
@@ -56,7 +57,6 @@ local API          = import("API")
 local KnifeCatalog = import("KnifeCatalog")
 local GunCatalog   = import("GunCatalog")
 local GloveCatalog = import("GloveCatalog")
-local LinoriaLib   = import("LinoriaLib")
 local UIManager    = import("UIManager")
 
 -- Bind subsystems
@@ -75,8 +75,8 @@ local function cleanup()
     _G.__alvinSkinChangerJanitor = nil
 end
 
--- Initialize UI with Knife catalog and gun controls
-UIManager.init(Config, LinoriaLib, API, Database, cleanup)
+-- Initialize UI
+UIManager.init(Config, Arvn, API, Database, KnifeCatalog, GunCatalog, GloveCatalog)
 
 -- Global exports
 _G.SkinChanger = API
