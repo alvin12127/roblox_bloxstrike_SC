@@ -9,10 +9,9 @@
 local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local SkinsLib = nil
-pcall(function()
-    SkinsLib = require(ReplicatedStorage.Database.Components.Libraries.Skins)
-end)
+-- SkinsLib is injected by init.lua. The hardcoded path these catalogs used to
+-- require does not exist in this game, so every preview viewport stayed empty.
+local SkinsLib = (_G.__bloxstrikeSkinsLib) or nil
 
 local GloveCatalog = {
     Initialized = false,

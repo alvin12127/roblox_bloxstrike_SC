@@ -1,11 +1,12 @@
 -- @Discord_alvin6974. / Bloxstrike Skinchanger / KnifeCatalog
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
-local SkinsLib = nil
-pcall(function()
-    SkinsLib = require(ReplicatedStorage.Database.Components.Libraries.Skins)
-end)
+-- SkinsLib resolves the game's skin module across the layouts this game has
+-- shipped. The catalogs used to require a hardcoded path that does not exist
+-- (ReplicatedStorage.Database.Components.Libraries.Skins), which left every
+-- preview viewport empty. init.lua injects the resolved module as a global
+-- because these catalog files are loaded as plain chunks, not as children of it.
+local SkinsLib = (_G.__bloxstrikeSkinsLib) or nil
 
 local KnifeCatalog = {
     Initialized = false,
