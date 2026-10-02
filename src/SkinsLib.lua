@@ -74,9 +74,40 @@ do
         local mod = tryModule(segments)
         if mod then
             SkinsLib.Resolved = table.concat(segments, ".")
+            SkinsLib.Module = mod
             break
         end
     end
+end
+
+-- Record what the resolved module actually exposes. The catalogs call
+-- GetCharacterModel / GetGloves / GetSkinInformation, but the real names in the
+-- live game build are not known from an instance dump, so the resolved function
+-- names are reported on screen to make any mismatch immediately visible.
+SkinsLib.Found = {}
+do
+    local mod = SkinsLib.Module
+    if mod then
+        local names = {}
+        for key, value in pairs(mod) do
+            if type(key) == "string" then
+                table.insert(names, key)
+                if type(value) == "function" then
+                    SkinsLib.Found[#SkinsLib.Found + 1] = key
+                end
+            end
+        end
+        table.sort(names)
+        SkinsLib.Names = names
+    end
+end
+
+SkinsLib.Report = function()
+    if SkinsLib.Resolved then
+        return "SkinsLib OK: " .. SkinsLib.Resolved
+            .. "  fns: " .. table.concat(SkinsLib.Found, ", ")
+    end
+    return "SkinsLib NOT resolved (tried " .. #CANDIDATE_PATHS .. " paths)"
 end
 
 --------------------------------------------------------------------
@@ -97,6 +128,16 @@ function SkinsLib.GetCharacterModel(modelName, skinName, scale)
     if not raw then return nil end
 
     local getter = raw.GetCharacterModel or raw.GetSkinModel or raw.GetModel
+    if type(getter) ~= "function" then
+        -- last resort: any exported function whose name mentions the model
+        for _, name in ipairs(SkinsLib.Found) do
+            local lname = name:lower()
+            if lname:find("model", 1, true) and not lname:find("glove", 1, true) then
+                local alt = raw[name]
+                if type(alt) == "function" then getter = alt break end
+            end
+        end
+    end
     if type(getter) ~= "function" then return nil end
 
     local ok, model = pcall(function()
