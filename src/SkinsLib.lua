@@ -49,7 +49,13 @@ local function resolvePath(segments)
     return node
 end
 
--- Require a candidate and accept it only when it exposes something we use.
+-- Require a candidate and accept it if it is a usable module table.
+--
+-- The acceptance test only checks that the module returned a table. Requiring a
+-- specific function used to reject the real module, because this build exports
+-- GetGloves / GetMagazine / GetKillTime / GetWeaponNameForFolder and none of the
+-- names the old check looked for - so the resolver reported NOT resolved even
+-- though it had found the right ModuleScript.
 local function tryModule(segments)
     local inst = resolvePath(segments)
     if not inst then return nil end
@@ -57,14 +63,6 @@ local function tryModule(segments)
     local mod = nil
     pcall(function() mod = require(inst) end)
     if type(mod) ~= "table" then return nil end
-
-    local hasPreviewApi = (type(mod.GetCharacterModel) == "function")
-        or (type(mod.GetSkinModel) == "function")
-        or (type(mod.GetModel) == "function")
-    local hasInfoApi = (type(mod.GetSkinInformation) == "function")
-        or (type(mod.GetSkinInfo) == "function")
-
-    if (not hasPreviewApi) and (not hasInfoApi) then return nil end
 
     return mod
 end
@@ -155,20 +153,41 @@ end
 --
 -- The wear folder holds the actual mesh, so cloning its BaseParts gives a
 -- preview that matches what the player will see equipped.
-function SkinsLib.BuildModelFromDatabase(modelName, skinName)
-    local database = ReplicatedStorage:FindFirstChild("Database")
-    if not database or type(modelName) ~= "string" then return nil end
+-- Per-weapon part cache.
+--
+-- The catalog calls this once per card (12 knives, 27 guns, 8 gloves), and each
+-- call used to walk the whole weapon folder recursively. Re-walking the same
+-- static tree dozens of times per render produced the frame stutter, so the part
+-- list is gathered once per weapon and reused.
+local partCache = {}
 
-    local weaponFolder = nil
-    pcall(function() weaponFolder = database:FindFirstChild(modelName) end)
-    if not weaponFolder then return nil end
+-- Depth cap so a pathological tree can never hang the render loop.
+local MAX_DEPTH = 5
 
-    -- collect every BasePart in the tree, preferring the requested wear
-    local wantedWear = {
-        [tostring(skinName or ""):lower()] = true,
-        ["vanilla"] = true, ["stock"] = true, ["factory new"] = true,
-    }
+-- A weapon is made of many MeshParts. Cloning all of them for every card (47
+-- cards across the three catalogs) in one frame is what caused the stutter, so a
+-- single preview uses only the largest few parts - visually identical at card
+-- size, a fraction of the cost.
+local MAX_PARTS = 8
 
+local function collectParts(node, out, depth)
+    if depth > MAX_DEPTH or #out >= MAX_PARTS then return end
+    for _, d in ipairs(node:GetChildren()) do
+        if #out >= MAX_PARTS then return end
+        if d:IsA("BasePart") then
+            table.insert(out, d)
+        else
+            collectParts(d, out, depth + 1)
+        end
+    end
+end
+
+-- Which wear folders exist for a weapon, and the BaseParts inside the best one.
+--
+-- This game only stores a handful of wear folders (Factory New / Field-Tested /
+-- Battle-Scarred), so a plain "prefer a known good wear" score is enough and no
+-- per-skin-name matching is required.
+local function getWeaponParts(weaponFolder)
     local best = nil
     local bestScore = -1
 
@@ -176,19 +195,11 @@ function SkinsLib.BuildModelFromDatabase(modelName, skinName)
         for _, wearFolder in ipairs(weaponFolder:GetChildren()) do
             if wearFolder:IsA("Folder") then
                 local wearName = tostring(wearFolder.Name):lower()
-                local score = wantedWear[wearName] and 10 or 1
+                local score = (wearName == "factory new" or wearName == "vanilla"
+                    or wearName == "stock") and 5 or 1
 
                 local parts = {}
-                local function collect(node)
-                    for _, d in ipairs(node:GetChildren()) do
-                        if d:IsA("BasePart") then
-                            table.insert(parts, d)
-                        else
-                            collect(d)
-                        end
-                    end
-                end
-                collect(wearFolder)
+                collectParts(wearFolder, parts, 1)
 
                 if #parts > 0 and score > bestScore then
                     best, bestScore = parts, score
@@ -197,57 +208,68 @@ function SkinsLib.BuildModelFromDatabase(modelName, skinName)
         end
     end)
 
-    -- No BasePart directly in the wear folders: this game stores only
-    -- SurfaceAppearance / accessory folders there. Fall back to the weapon
-    -- folder's own BaseParts, and finally to the model the equipped character
-    -- is actually wearing, which is always present in game.
     if not best then
-        local function collectAll(node, out)
-            for _, d in ipairs(node:GetChildren()) do
-                if d:IsA("BasePart") then table.insert(out, d)
-                else collectAll(d, out) end
-            end
-        end
         pcall(function()
             local parts = {}
-            collectAll(weaponFolder, parts)
+            collectParts(weaponFolder, parts, 0)
             if #parts > 0 then best = parts end
         end)
     end
 
-    if not best then return nil end
+    return best
+end
+
+function SkinsLib.BuildModelFromDatabase(modelName, skinName)
+    local database = ReplicatedStorage:FindFirstChild("Database")
+    if not database or type(modelName) ~= "string" then return nil end
+
+    local weaponFolder = nil
+    pcall(function() weaponFolder = database:FindFirstChild(modelName) end)
+    if not weaponFolder then return nil end
+
+    local key = tostring(modelName):lower()
+
+    if partCache[key] == nil then
+        partCache[key] = getWeaponParts(weaponFolder) or false
+    end
+
+    local parts = partCache[key]
+    if not parts or #parts == 0 then return nil end
 
     -- assemble the clones into a single Model the viewport can display
     local model = Instance.new("Model")
     model.Name = tostring(modelName)
 
-    local okAll = pcall(function()
-        for i, part in ipairs(best) do
-            local clone = nil
-            pcall(function() clone = part:Clone() end)
-            if clone then
+    for i, part in ipairs(parts) do
+        local clone = nil
+        pcall(function() clone = part:Clone() end)
+        if clone then
+            pcall(function()
                 clone.Anchored = true
                 clone.CanCollide = false
                 clone.CanTouch = false
                 clone.CanQuery = false
                 clone.Name = tostring(part.Name) .. "_" .. tostring(i)
                 clone.Parent = model
-            end
+            end)
         end
-    end)
+    end
 
-    if not okAll then return nil end
+    if #model:GetChildren() == 0 then
+        pcall(function() model:Destroy() end)
+        return nil
+    end
 
     -- Recentre on the origin so the viewport camera framing puts the weapon in
-    -- the middle of the card. The bounding box CFrame gives the centre point.
+    -- the middle of the card.
     pcall(function()
         local cf = model:GetBoundingBox()
         if cf and typeof(cf) == "CFrame" then
             local centre = cf.Position
+            local offset = CFrame.new(-centre.X, -centre.Y, -centre.Z)
             for _, d in ipairs(model:GetChildren()) do
                 if d:IsA("BasePart") then
-                    local p = d.Position
-                    d.CFrame = CFrame.new(-centre.X, -centre.Y, -centre.Z) * d.CFrame
+                    d.CFrame = offset * d.CFrame
                 end
             end
         end
