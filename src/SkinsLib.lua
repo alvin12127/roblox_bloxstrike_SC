@@ -123,47 +123,155 @@ if SkinsLib.Resolved then
 end
 
 -- GetCharacterModel(modelName, skinName, scale) -> Model | nil
+--
+-- The live build of this game exports only these functions:
+--   GetWeaponNameForFolder, GetGloves, GetMagazine, GetKillTime
+-- There is no "GetCharacterModel", which is why every preview viewport stayed
+-- empty once the require path was fixed. The weapon models themselves live under
+-- ReplicatedStorage/Database/<weapon>/<wear>/... , so the model is assembled
+-- from those parts instead of asking the library for it.
 function SkinsLib.GetCharacterModel(modelName, skinName, scale)
     local raw = SkinsLib.Raw
     if not raw then return nil end
 
+    -- If a future build does expose a real model getter, prefer it.
     local getter = raw.GetCharacterModel or raw.GetSkinModel or raw.GetModel
-    if type(getter) ~= "function" then
-        -- last resort: any exported function whose name mentions the model
-        for _, name in ipairs(SkinsLib.Found) do
-            local lname = name:lower()
-            if lname:find("model", 1, true) and not lname:find("glove", 1, true) then
-                local alt = raw[name]
-                if type(alt) == "function" then getter = alt break end
+    if type(getter) == "function" then
+        local ok, model = pcall(function() return getter(modelName, skinName, scale) end)
+        if ok and model then return model end
+    end
+
+    return SkinsLib.BuildModelFromDatabase(modelName, skinName)
+end
+
+-- Build a Model out of the geometry the game stores in ReplicatedStorage.
+--
+-- From an instance dump of the live game:
+--   ReplicatedStorage
+--     Database
+--       <Weapon Name>            (Folder)
+--         <Wear>                  (Folder: Factory New / Field-Tested / ...)
+--           <SurfaceAppearance / Part>  ...
+--
+-- The wear folder holds the actual mesh, so cloning its BaseParts gives a
+-- preview that matches what the player will see equipped.
+function SkinsLib.BuildModelFromDatabase(modelName, skinName)
+    local database = ReplicatedStorage:FindFirstChild("Database")
+    if not database or type(modelName) ~= "string" then return nil end
+
+    local weaponFolder = nil
+    pcall(function() weaponFolder = database:FindFirstChild(modelName) end)
+    if not weaponFolder then return nil end
+
+    -- collect every BasePart in the tree, preferring the requested wear
+    local wantedWear = {
+        [tostring(skinName or ""):lower()] = true,
+        ["vanilla"] = true, ["stock"] = true, ["factory new"] = true,
+    }
+
+    local best = nil
+    local bestScore = -1
+
+    pcall(function()
+        for _, wearFolder in ipairs(weaponFolder:GetChildren()) do
+            if wearFolder:IsA("Folder") then
+                local wearName = tostring(wearFolder.Name):lower()
+                local score = wantedWear[wearName] and 10 or 1
+
+                local parts = {}
+                local function collect(node)
+                    for _, d in ipairs(node:GetChildren()) do
+                        if d:IsA("BasePart") then
+                            table.insert(parts, d)
+                        else
+                            collect(d)
+                        end
+                    end
+                end
+                collect(wearFolder)
+
+                if #parts > 0 and score > bestScore then
+                    best, bestScore = parts, score
+                end
             end
         end
-    end
-    if type(getter) ~= "function" then return nil end
-
-    local ok, model = pcall(function()
-        return getter(modelName, skinName, scale)
     end)
-    if ok and model then return model end
-    return nil
+
+    -- No BasePart directly in the wear folders: this game stores only
+    -- SurfaceAppearance / accessory folders there. Fall back to the weapon
+    -- folder's own BaseParts, and finally to the model the equipped character
+    -- is actually wearing, which is always present in game.
+    if not best then
+        local function collectAll(node, out)
+            for _, d in ipairs(node:GetChildren()) do
+                if d:IsA("BasePart") then table.insert(out, d)
+                else collectAll(d, out) end
+            end
+        end
+        pcall(function()
+            local parts = {}
+            collectAll(weaponFolder, parts)
+            if #parts > 0 then best = parts end
+        end)
+    end
+
+    if not best then return nil end
+
+    -- assemble the clones into a single Model the viewport can display
+    local model = Instance.new("Model")
+    model.Name = tostring(modelName)
+
+    local okAll = pcall(function()
+        for i, part in ipairs(best) do
+            local clone = nil
+            pcall(function() clone = part:Clone() end)
+            if clone then
+                clone.Anchored = true
+                clone.CanCollide = false
+                clone.CanTouch = false
+                clone.CanQuery = false
+                clone.Name = tostring(part.Name) .. "_" .. tostring(i)
+                clone.Parent = model
+            end
+        end
+    end)
+
+    if not okAll then return nil end
+
+    -- Recentre on the origin so the viewport camera framing puts the weapon in
+    -- the middle of the card. The bounding box CFrame gives the centre point.
+    pcall(function()
+        local cf = model:GetBoundingBox()
+        if cf and typeof(cf) == "CFrame" then
+            local centre = cf.Position
+            for _, d in ipairs(model:GetChildren()) do
+                if d:IsA("BasePart") then
+                    local p = d.Position
+                    d.CFrame = CFrame.new(-centre.X, -centre.Y, -centre.Z) * d.CFrame
+                end
+            end
+        end
+    end)
+
+    return model
 end
 
 -- GetGloves(gloveName, skinName, scale) -> Model | nil
 --
--- The glove catalog uses this name, which is the same call the game itself makes
--- when it builds a glove viewmodel. Resolved separately so the glove preview
--- keeps working even if the general model getter has a different signature.
+-- The live build DOES export GetGloves, so this is used directly. If it does not
+-- return a model, fall back to assembling one from ReplicatedStorage/Database.
 function SkinsLib.GetGloves(gloveName, skinName, scale)
     local raw = SkinsLib.Raw
     if not raw then return nil end
 
-    local getter = raw.GetGloves or raw.GetGloveModel or raw.GetCharacterModel
-    if type(getter) ~= "function" then return nil end
+    if type(raw.GetGloves) == "function" then
+        local ok, model = pcall(function()
+            return raw.GetGloves(gloveName, skinName, scale)
+        end)
+        if ok and model then return model end
+    end
 
-    local ok, model = pcall(function()
-        return getter(gloveName, skinName, scale)
-    end)
-    if ok and model then return model end
-    return nil
+    return SkinsLib.BuildModelFromDatabase(gloveName, skinName)
 end
 
 -- GetSkinInformation(modelName, skinName) -> { rarity = ... } | nil
