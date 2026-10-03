@@ -1,0 +1,8 @@
+# Normalise line endings on commit. Without this a file written by PowerShell
+# (CRLF) hashes differently from the LF blob git stores, which makes a byte
+# comparison against the remote look like a mismatch when nothing changed.
+* text=auto eol=lf
+
+*.lua text eol=lf
+*.md  text eol=lf
+*.json text eol=lf

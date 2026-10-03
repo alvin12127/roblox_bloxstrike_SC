@@ -101,11 +101,27 @@ do
 end
 
 SkinsLib.Report = function()
+    local head
     if SkinsLib.Resolved then
-        return "SkinsLib OK: " .. SkinsLib.Resolved
+        head = "SkinsLib OK: " .. SkinsLib.Resolved
             .. "  fns: " .. table.concat(SkinsLib.Found, ", ")
+    else
+        head = "SkinsLib NOT resolved (tried " .. #CANDIDATE_PATHS .. " paths)"
     end
-    return "SkinsLib NOT resolved (tried " .. #CANDIDATE_PATHS .. " paths)"
+
+    -- Append whether previews can actually be built. "OK" on its own is not the
+    -- question being asked; an empty card is, and the two have very different
+    -- causes (a failed require vs geometry that is nowhere to be found).
+    local hasGetter = (type(SkinsLib.GetCharacterModel) == "function")
+    local probe = nil
+    pcall(function()
+        probe = SkinsLib.BuildModelFromDatabase("C4", "Factory New")
+    end)
+    head = head
+        .. "  getchar=" .. tostring(hasGetter)
+        .. "  probe=" .. tostring(probe ~= nil)
+
+    return head
 end
 
 --------------------------------------------------------------------

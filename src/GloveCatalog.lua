@@ -30,6 +30,45 @@ local function cleanupViewports()
     GloveCatalog.ViewportCleanups = {}
 end
 
+-- A ViewportFrame no longer renders instances parented directly to it: the model
+-- has to live in a WorldModel assigned to the frame's WorldModel property.
+--
+-- This is what broke when the catalogs moved out of the standalone Linoria
+-- window and into the arvn tab. The previews were building correctly the whole
+-- time - they were simply being parented somewhere that stopped displaying them,
+-- so every card came up as an empty box. Nothing about the UI move was wrong; the
+-- parenting was always one API generation behind.
+local function attachPreviewModel(viewportFrame, clone)
+    local world = nil
+    pcall(function() world = Instance.new("WorldModel") end)
+
+    if not world then
+        -- Very old client: direct parenting is all it understands.
+        attachPreviewModel(viewportFrame, clone)
+        return clone
+    end
+
+    -- Clear whatever the previous preview left behind. ClearAllChildren on the
+    -- frame does NOT touch the WorldModel, so it has to be emptied explicitly or
+    -- every card accumulates one dead model per wear that was ever opened.
+    local previous = nil
+    pcall(function() previous = viewportFrame.WorldModel end)
+    if previous then
+        pcall(function()
+            for _, child in ipairs(previous:GetChildren()) do
+                child:Destroy()
+            end
+        end)
+    end
+
+    world.Name = "PreviewWorld"
+    pcall(function() viewportFrame.WorldModel = world end)
+
+    -- A WorldModel must not be parented into the live scene.
+    clone.Parent = world
+    return clone
+end
+
 local function setupGloveViewport(viewportFrame, gloveModel, skinName)
     viewportFrame:ClearAllChildren()
     if not SkinsLib then return nil end
@@ -74,7 +113,7 @@ local function setupGloveViewport(viewportFrame, gloveModel, skinName)
     local cloneOk, cloneRes = pcall(function() return model:Clone() end)
     if cloneOk and cloneRes then clone = cloneRes end
 
-    clone.Parent = viewportFrame
+    attachPreviewModel(viewportFrame, clone)
 
     local cf, size = clone:GetBoundingBox()
     local maxDim = math.max(size.X, size.Y, size.Z, 0.5)
