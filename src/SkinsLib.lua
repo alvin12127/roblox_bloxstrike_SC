@@ -177,21 +177,37 @@ SkinsLib.Report = function()
     -- wrapper and therefore always non-nil - a diagnostic that could not fail is
     -- worse than none. It now counts the RAW module's model-ish getters.
     --
-    -- The probe tries several weapons rather than one: "C4" happens to keep only
-    -- textures in its wear folders, so probing with it alone reported probe=false
-    -- for a build where knives and guns resolved perfectly fine. A single-name
-    -- probe is a false negative waiting to happen.
+    -- Now that the folder is known, probe with the names the catalogs actually use.
+    -- "C4" was a bad probe on its own: a build where every knife resolves fine
+    -- still reported probe=false, which is how a wrong answer survived several
+    -- rounds.
     local probed = 0
-    for _, name in ipairs({ "CT Knife", "T Knife", "Knife", "C4" }) do
+    for _, spec in ipairs({
+        { "CT Knife", "Stock" },
+        { "T Knife", "Stock" },
+        { "Tec-9", "Striker" },
+        { "C4", "Stock" },
+    }) do
         local model = nil
-        pcall(function() model = SkinsLib.BuildModelFromDatabase(name, "Factory New") end)
+        pcall(function() model = SkinsLib.BuildModelFromDatabase(spec[1], spec[2]) end)
         if usableModel(model) then
             probed = probed + 1
             break
         end
     end
 
-    head = head .. "  rawmodel=" .. tostring(#SkinsLib.RawGetters)
+    -- Also report the roots that exist, so a path change is visible immediately
+    -- instead of being guessed at again.
+    local roots = skinAssetRoots()
+    local rootNames = {}
+    for _, r in ipairs(roots) do
+        local n = nil
+        pcall(function() n = r.Name end)
+        rootNames[#rootNames + 1] = tostring(n)
+    end
+
+    head = head .. "  roots=" .. table.concat(rootNames, "+")
+        .. "  rawmodel=" .. tostring(#SkinsLib.RawGetters)
         .. "  probe=" .. tostring(probed > 0)
 
     return head
@@ -296,6 +312,19 @@ end
 -- static tree dozens of times per render produced the frame stutter, so the part
 -- list is gathered once per weapon and reused.
 local partCache = {}
+
+-- Wear folder names. These hold SurfaceAppearance instances only - textures with
+-- no mesh and no BasePart to attach to - so they are skipped when looking for the
+-- geometry and are only used as a last-resort fallback.
+local WEAR_NAMES = {
+    ["factory new"] = true,
+    ["field-tested"] = true,
+    ["battle-scarred"] = true,
+    ["minimal wear"] = true,
+    ["well-worn"] = true,
+    ["vanilla"] = true,
+    ["stock"] = true,
+}
 
 -- Depth cap so a pathological tree can never hang the render loop.
 local MAX_DEPTH = 5
@@ -424,15 +453,85 @@ local function getWeaponParts(weaponFolder)
     return nil
 end
 
-function SkinsLib.BuildModelFromDatabase(modelName, skinName)
-    local database = ReplicatedStorage:FindFirstChild("Database")
-    if not database or type(modelName) ~= "string" then return nil end
+-- WHERE THE SKIN ASSETS LIVE.
+--
+-- ReplicatedStorage/Database is NOT it. That folder is a tree of ModuleScripts -
+-- Security, Audio, BreakableDoor, Weapons/&lt;AK-47&gt;, Round - it is game code,
+-- so Database:FindFirstChild("CT Knife") is nil forever and probe=false. Every
+-- version of this function looked there, which is why no preview ever built.
+--
+-- The assets are here, and this is the path the repo's own Database.lua already
+-- used (ReplicatedStorage:FindFirstChild("Assets") then :FindFirstChild("Skins")):
+--
+--   ReplicatedStorage
+--     Assets
+--       Skins
+--         Tec-9                  (Folder - the weapon)
+--           Striker              (Folder - the skin)
+--             Character          (Folder)
+--               Factory New / Field-Tested / Battle-Scarred ...
+--             Camera
+--
+-- Note the wear folders hold SurfaceAppearance only - textures with no mesh - so
+-- the parts have to come from a level or two above them, not from inside a wear
+-- folder.
+local function skinAssetRoots()
+    local roots = {}
 
-    local weaponFolder = nil
-    pcall(function() weaponFolder = database:FindFirstChild(modelName) end)
+    pcall(function()
+        local assets = ReplicatedStorage:FindFirstChild("Assets")
+        if assets then
+            local skins = nil
+            pcall(function() skins = assets:FindFirstChild("Skins") end)
+            if skins then
+                roots[#roots + 1] = skins
+            else
+                roots[#roots + 1] = assets
+            end
+        end
+    end)
+
+    -- Kept as a secondary root: if a future build does move the meshes under
+    -- Database, this still finds them.
+    pcall(function()
+        local db = ReplicatedStorage:FindFirstChild("Database")
+        if db then roots[#roots + 1] = db end
+    end)
+
+    return roots
+end
+
+-- Find the folder for a weapon, and inside it the folder for a specific skin.
+-- Both levels are optional: with no skin match the weapon folder itself is used,
+-- and a skin-named subfolder is preferred over a wear folder.
+local function findSkinFolder(modelName, skinName)
+    for _, root in ipairs(skinAssetRoots()) do
+        local weaponFolder = nil
+        pcall(function() weaponFolder = root:FindFirstChild(modelName) end)
+        if not weaponFolder then
+            pcall(function() weaponFolder = root:FindFirstChild(tostring(modelName):upper()) end)
+        end
+        if weaponFolder and weaponFolder:IsA("Folder") then
+            if type(skinName) == "string" and skinName ~= "" then
+                local skinFolder = nil
+                pcall(function() skinFolder = weaponFolder:FindFirstChild(skinName) end)
+                if skinFolder and skinFolder:IsA("Folder") and (not WEAR_NAMES[skinName:lower()]) then
+                    return skinFolder
+                end
+            end
+            return weaponFolder
+        end
+    end
+    return nil
+end
+
+function SkinsLib.BuildModelFromDatabase(modelName, skinName)
+    if type(modelName) ~= "string" then return nil end
+
+    local weaponFolder = findSkinFolder(modelName, skinName)
     if not weaponFolder then return nil end
 
-    local key = tostring(modelName):lower()
+    local key = tostring(modelName):lower() .. "/" .. tostring(skinName):lower()
 
     if partCache[key] == nil then
         partCache[key] = getWeaponParts(weaponFolder) or false
