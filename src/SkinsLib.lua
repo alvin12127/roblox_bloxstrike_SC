@@ -179,6 +179,10 @@ SkinsLib.RawGetters = SkinsLib.RawGetters or {}
 -- now scans for it.
 local skinAssetRoots
 
+-- Same reason. MESH_ROOT_PATHS is defined next to meshFor, far below this report,
+-- and the report reads it to say how many weapon folders each geometry root holds.
+local MESH_ROOT_PATHS
+
 SkinsLib.Report = function()
     local head
     if SkinsLib.Resolved then
@@ -195,19 +199,21 @@ SkinsLib.Report = function()
     -- "C4" was a bad probe on its own: a build where every knife resolves fine
     -- still reported probe=false, which is how a wrong answer survived several
     -- rounds.
-    local probed = 0
+    local probed, trace = 0, "-"
     for _, spec in ipairs({
         { "CT Knife", "Stock" },
-        { "T Knife", "Stock" },
         { "Tec-9", "Striker" },
-        { "C4", "Stock" },
+        { "AWP", "Dragon Lore" },
+        { "Karambit", "Fade" },
     }) do
-        local model = nil
-        pcall(function() model = SkinsLib.BuildModelFromDatabase(spec[1], spec[2]) end)
+        local model, why = nil, nil
+        pcall(function() model, why = SkinsLib.BuildModelFromDatabase(spec[1], spec[2]) end)
         if usableModel(model) then
             probed = probed + 1
+            trace = tostring(spec[1]) .. " ok " .. tostring(why)
             break
         end
+        trace = tostring(spec[1]) .. " " .. tostring(why)
     end
 
     -- Also report the roots that exist, so a path change is visible immediately
@@ -220,9 +226,24 @@ SkinsLib.Report = function()
         rootNames[#rootNames + 1] = tostring(n)
     end
 
+    -- Mesh roots, and how many weapon folders each one holds. If these read 0 then
+    -- there is no geometry anywhere to build a preview from and no amount of
+    -- re-ordering the lookup will help.
+    local meshInfo = {}
+    for _, segs in ipairs(MESH_ROOT_PATHS) do
+        local root = resolvePath(segs)
+        local n = 0
+        if root then
+            pcall(function() n = #root:GetChildren() end)
+        end
+        meshInfo[#meshInfo + 1] = table.concat(segs, "/") .. "=" .. tostring(n)
+    end
+
     head = head .. "  roots=" .. table.concat(rootNames, "+")
+        .. "  mesh=" .. table.concat(meshInfo, ",")
         .. "  rawmodel=" .. tostring(#SkinsLib.RawGetters)
         .. "  probe=" .. tostring(probed > 0)
+        .. "  [" .. tostring(trace) .. "]"
 
     return head
 end
@@ -243,10 +264,25 @@ end
 SkinsLib.Available = (SkinsLib.Resolved ~= nil)
 
 -- The raw module, for callers that need a specific function name.
+-- Split a dotted path into a segment list.
+--
+-- Written out rather than passing string.gmatch's result straight to resolvePath:
+-- gmatch returns a STATEFUL ITERATOR FUNCTION and resolvePath iterates with ipairs,
+-- which expects a table. Zero iterations, so resolvePath returned the root itself
+-- and SkinsLib.Raw was silently nil - the raw module was never available, and every
+-- call that went through it (GetGloves, GetSkinInformation, GetCharacterModel) fell
+-- through to the fallback without ever trying the real library.
+local function splitPath(path)
+    local out = {}
+    for seg in tostring(path):gmatch("[^%.]+") do
+        out[#out + 1] = seg
+    end
+    return out
+end
+
 SkinsLib.Raw = nil
 if SkinsLib.Resolved then
-    pcall(function() SkinsLib.Raw = require(resolvePath(
-        (SkinsLib.Resolved:gmatch("[^%.]+")))) end)
+    pcall(function() SkinsLib.Raw = require(resolvePath(splitPath(SkinsLib.Resolved))) end)
 end
 
 -- GetCharacterModel(modelName, skinName, scale) -> Model | nil
@@ -327,18 +363,44 @@ end
 -- list is gathered once per weapon and reused.
 local partCache = {}
 
--- Wear folder names. These hold SurfaceAppearance instances only - textures with
--- no mesh and no BasePart to attach to - so they are skipped when looking for the
--- geometry and are only used as a last-resort fallback.
+-- Wear folder names. Everything under these is SurfaceAppearance only - textures,
+-- no mesh - so they are skipped when hunting for geometry.
+--
+-- BOTH SPELLINGS ARE PRESENT IN THE LIVE GAME. The tree contains "Field-Tested"
+-- AND "Field Tested" as separate folders on different weapons, likewise
+-- "Well-Worn" and "Well Worn". Matching only the hyphenated forms left the
+-- un-hyphenated folders looking like skin names.
+--
+-- Group-level names sit one level above the wear folders and are not skins either.
 local WEAR_NAMES = {
     ["factory new"] = true,
     ["field-tested"] = true,
+    ["field tested"] = true,
     ["battle-scarred"] = true,
+    ["battle scarred"] = true,
     ["minimal wear"] = true,
     ["well-worn"] = true,
+    ["well worn"] = true,
     ["vanilla"] = true,
     ["stock"] = true,
 }
+
+local GROUP_NAMES = {
+    ["character"] = true,
+    ["camera"] = true,
+    ["globals"] = true,
+    ["world"] = true,
+}
+
+-- Compare names the way the game does: "M4A1-S", "M4A1 S" and "m4a1_s" are one
+-- weapon. A literal FindFirstChild missed a third of the weapons over spacing and
+-- case alone.
+local function norm(s)
+    return (tostring(s or ""):lower():gsub("[%s%-_%.]", ""))
+end
+
+local function isWear(s) return WEAR_NAMES[tostring(s or ""):lower()] == true end
+local function isGroup(s) return GROUP_NAMES[tostring(s or ""):lower()] == true end
 
 -- Depth cap so a pathological tree can never hang the render loop.
 local MAX_DEPTH = 5
@@ -403,71 +465,137 @@ local function partsExtent(parts)
     return (maxX - minX) * (maxY - minY) * (maxZ - maxZ)
 end
 
--- Which wear folders exist for a weapon, and the BaseParts inside the best one.
+-- A skin is stored in TWO PLACES and neither one is a preview on its own. This is
+-- the layout, established from an instance dump of the live game:
 --
--- This game only stores a handful of wear folders (Factory New / Field-Tested /
--- Battle-Scarred), so a plain "prefer a known good wear" score is enough and no
--- per-skin-name matching is required.
-local function getWeaponParts(weaponFolder)
-    local best = nil
-    local bestScore = -1
+--   ReplicatedStorage/Assets/Skins/<Weapon>/<Skin>/<Group>/<Wear>/<Part>/
+--       SurfaceAppearance, SurfaceAppearance, ...        <- TEXTURE ONLY
+--
+--   ReplicatedStorage/Assets/Weapons/<Weapon>/...                    <- MeshPart
+--   ReplicatedStorage/Assets/InspectScenes/...                       <- MeshPart
+--
+-- Assets/Skins was counted directly: 53 children, 4524 nested Folders, 15023
+-- SurfaceAppearances, and ZERO MeshPart, Part or SpecialMesh. There is no geometry
+-- anywhere under it, which is why every attempt to build a preview from that tree
+-- returned nothing no matter how the search was ordered.
+--
+-- The mesh half is elsewhere, and it lines up: 125 of the 136 part names used by
+-- the skin textures are also part names on the meshes in Assets/Weapons and
+-- Assets/InspectScenes. So a preview is assembled by cloning the mesh parts and
+-- then cloning each part's SurfaceAppearance onto the part of the same name - which
+-- is what the game itself does when it renders a weapon.
+MESH_ROOT_PATHS = {
+    { "Assets", "Weapons" },
+    { "Assets", "InspectScenes" },
+    { "Assets", "MenuScenes" },
+    { "Assets", "Other" },
+}
 
-    -- WEAR FOLDERS FIRST. This is the order the previews worked in, because the
-    -- original standalone window produced them with exactly this lookup - the C4
-    -- folder happens to hold only SurfaceAppearance, which made it look like the
-    -- wear folders were the wrong place, but knives, guns and gloves all keep
-    -- their mesh there. Demoting wear to a fallback is what broke the cards.
+-- Find the folder or model holding a weapon's mesh, matching names loosely.
+local meshCache = {}
+
+local function scanForMesh(folder, wantNorm, depth, out)
+    if out or depth > 3 then return end
     pcall(function()
-        for _, wearFolder in ipairs(weaponFolder:GetChildren()) do
-            if wearFolder:IsA("Folder") then
-                local wearName = tostring(wearFolder.Name):lower()
-                local score = (wearName == "factory new" or wearName == "vanilla"
-                    or wearName == "stock") and 5 or 1
-
-                local parts = {}
-                collectParts(wearFolder, parts, 1)
-
-                if #parts > 0 and score > bestScore then
-                    best, bestScore = parts, score
-                end
+        for _, child in ipairs(folder:GetChildren()) do
+            if out then return end
+            local name = nil
+            pcall(function() name = child.Name end)
+            if name and norm(name) == wantNorm then
+                out = child
+                return
+            end
+            local canDescend = false
+            pcall(function() canDescend = child:IsA("Folder") or child:IsA("Model") end)
+            if canDescend then
+                scanForMesh(child, wantNorm, depth + 1, out)
             end
         end
     end)
+end
 
-    if best then return best end
+local function meshFor(weaponName)
+    local key = norm(weaponName)
+    if meshCache[key] ~= nil then
+        local cached = meshCache[key]
+        return cached ~= false and cached or nil
+    end
 
-    -- Only then the geometry subfolders, for a weapon whose wear folders are
-    -- texture-only (the C4 is one of them).
-    local smallest = nil
-    local smallestVolume = math.huge
-    pcall(function()
-        for _, folder in ipairs(weaponFolder:GetChildren()) do
-            if folder:IsA("Folder") and (not WEAR_NAMES[tostring(folder.Name):lower()]) then
-                local parts = {}
-                collectParts(folder, parts, 1)
-                if #parts > 0 then
-                    local volume = partsExtent(parts)
-                    if volume and volume < smallestVolume then
-                        smallestVolume = volume
-                        smallest = parts
+    local found = nil
+    for _, segs in ipairs(MESH_ROOT_PATHS) do
+        local root = resolvePath(segs)
+        if root then
+            -- Direct child first: Assets/Weapons/<Weapon> is the common case.
+            pcall(function()
+                for _, child in ipairs(root:GetChildren()) do
+                    local n = nil
+                    pcall(function() n = child.Name end)
+                    if n and norm(n) == key then
+                        -- Confirm it actually holds parts before accepting it.
+                        local probe = {}
+                        collectParts(child, probe, 1)
+                        if #probe > 0 then
+                            found = child
+                            return
+                        end
+                    end
+                end
+            end)
+            if found then break end
+            scanForMesh(root, key, 1, found)
+            if found then break end
+        end
+    end
+
+    meshCache[key] = found or false
+    return found
+end
+
+-- Map normalised part name -> list of SurfaceAppearance instances for one skin.
+local function skinTextureMap(skinFolder)
+    local map = {}
+    local found = 0
+
+    -- <Skin>/<Group>/<Wear>/<Part>/<SurfaceAppearance...>
+    local function walk(node, depth)
+        if found > 0 and depth > 2 then return end
+        pcall(function()
+            for _, child in ipairs(node:GetChildren()) do
+                local isFolder = false
+                pcall(function() isFolder = child:IsA("Folder") end)
+                if isFolder then
+                    -- A folder that directly holds SurfaceAppearance IS a part.
+                    local saps = {}
+                    pcall(function()
+                        for _, d in ipairs(child:GetChildren()) do
+                            local isSA = false
+                            pcall(function() isSA = d:IsA("SurfaceAppearance") end)
+                            if isSA then saps[#saps + 1] = d end
+                        end
+                    end)
+
+                    if #saps > 0 then
+                        local n = nil
+                        pcall(function() n = child.Name end)
+                        local k = norm(n)
+                        map[k] = map[k] or {}
+                        for _, s in ipairs(saps) do
+                            map[k][#map[k] + 1] = s
+                            found = found + 1
+                        end
+                    elseif depth < 4 then
+                        walk(child, depth + 1)
                     end
                 end
             end
-        end
-    end)
-    if smallest then return smallest end
+        end)
+    end
 
-    -- Last resort: the whole weapon folder.
-    pcall(function()
-        local parts = {}
-        collectParts(weaponFolder, parts, 0)
-        if #parts > 0 then return parts end
-    end)
-
-    return nil
+    walk(skinFolder, 1)
+    return map, found
 end
 
--- WHERE THE SKIN ASSETS LIVE.
+    -- WHERE THE SKIN ASSETS LIVE.
 --
 -- ReplicatedStorage/Database is NOT it. That folder is a tree of ModuleScripts -
 -- Security, Audio, BreakableDoor, Weapons/&lt;AK-47&gt;, Round - it is game code,
@@ -539,26 +667,36 @@ local function findSkinFolder(modelName, skinName)
     return nil
 end
 
+-- Build a preview for one skin: mesh from Assets/Weapons or Assets/InspectScenes,
+-- textures from Assets/Skins, joined on part name.
+--
+-- Returns the Model, plus a short trace. The trace is what stops this from being
+-- guessed at again: "mesh=no" and "tex=0" mean completely different fixes, and they
+-- look identical from the outside - an empty card.
 function SkinsLib.BuildModelFromDatabase(modelName, skinName)
-    if type(modelName) ~= "string" then return nil end
+    if type(modelName) ~= "string" then return nil, "no-name" end
 
-    local weaponFolder = findSkinFolder(modelName, skinName)
-    if not weaponFolder then return nil end
+    local skinFolder = findSkinFolder(modelName, skinName)
+    if not skinFolder then return nil, "no-skin-folder" end
 
-    local key = tostring(modelName):lower() .. "/" .. tostring(skinName):lower()
+    local mesh = meshFor(modelName)
+    if not mesh then return nil, "no-mesh:" .. tostring(modelName) end
 
-    if partCache[key] == nil then
-        partCache[key] = getWeaponParts(weaponFolder) or false
+    local sourceParts = {}
+    collectParts(mesh, sourceParts, 1)
+    if #sourceParts == 0 then return nil, "mesh-empty:" .. tostring(modelName) end
+
+    -- Textures for this skin, keyed by normalised part name.
+    local texMap, texCount = {}, 0
+    if skinFolder then
+        texMap, texCount = skinTextureMap(skinFolder)
     end
 
-    local parts = partCache[key]
-    if not parts or #parts == 0 then return nil end
-
-    -- assemble the clones into a single Model the viewport can display
     local model = Instance.new("Model")
     model.Name = tostring(modelName)
 
-    for i, part in ipairs(parts) do
+    local cloned, textured = 0, 0
+    for i, part in ipairs(sourceParts) do
         local clone = nil
         pcall(function() clone = part:Clone() end)
         if clone then
@@ -570,16 +708,34 @@ function SkinsLib.BuildModelFromDatabase(modelName, skinName)
                 clone.Name = tostring(part.Name) .. "_" .. tostring(i)
                 clone.Parent = model
             end)
+
+            -- Keep the original name available for the texture lookup: the clone is
+            -- suffixed so the viewport can hold several weapons at once.
+            local originalName = nil
+            pcall(function() originalName = part.Name end)
+            local bucket = texMap[norm(originalName)]
+            if bucket then
+                for _, sa in ipairs(bucket) do
+                    local saClone = nil
+                    pcall(function() saClone = sa:Clone() end)
+                    if saClone then
+                        pcall(function() saClone.Parent = clone end)
+                        textured = textured + 1
+                    end
+                end
+            end
+
+            cloned = cloned + 1
         end
     end
 
-    if #model:GetChildren() == 0 then
+    if cloned == 0 then
         pcall(function() model:Destroy() end)
-        return nil
+        return nil, "clone-failed"
     end
 
-    -- Recentre on the origin so the viewport camera framing puts the weapon in
-    -- the middle of the card.
+    -- Recentre on the origin so the viewport camera framing puts the weapon in the
+    -- middle of the card.
     pcall(function()
         local cf = model:GetBoundingBox()
         if cf and typeof(cf) == "CFrame" then
@@ -593,7 +749,17 @@ function SkinsLib.BuildModelFromDatabase(modelName, skinName)
         end
     end)
 
-    return model
+    SkinsLib.LastTrace = string.format("%s parts=%d tex=%d applied=%d",
+        tostring(modelName), cloned, texCount, textured)
+
+    if textured == 0 then
+        -- Geometry without the skin's textures is a different picture than the one
+        -- the card claims to show, so it is reported rather than passed off as a
+        -- working preview.
+        return model, "untextured:" .. SkinsLib.LastTrace
+    end
+
+    return model, SkinsLib.LastTrace
 end
 
 -- GetGloves(gloveName, skinName, scale) -> Model | nil
