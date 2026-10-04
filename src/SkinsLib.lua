@@ -176,8 +176,23 @@ SkinsLib.Report = function()
     -- getchar used to report SkinsLib.GetCharacterModel, which is this file's own
     -- wrapper and therefore always non-nil - a diagnostic that could not fail is
     -- worse than none. It now counts the RAW module's model-ish getters.
+    --
+    -- The probe tries several weapons rather than one: "C4" happens to keep only
+    -- textures in its wear folders, so probing with it alone reported probe=false
+    -- for a build where knives and guns resolved perfectly fine. A single-name
+    -- probe is a false negative waiting to happen.
+    local probed = 0
+    for _, name in ipairs({ "CT Knife", "T Knife", "Knife", "C4" }) do
+        local model = nil
+        pcall(function() model = SkinsLib.BuildModelFromDatabase(name, "Factory New") end)
+        if usableModel(model) then
+            probed = probed + 1
+            break
+        end
+    end
+
     head = head .. "  rawmodel=" .. tostring(#SkinsLib.RawGetters)
-        .. "  probe=" .. tostring(usableModel(SkinsLib.BuildModelFromDatabase("C4", "Factory New")))
+        .. "  probe=" .. tostring(probed > 0)
 
     return head
 end
@@ -352,22 +367,25 @@ end
 -- per-skin-name matching is required.
 local function getWeaponParts(weaponFolder)
     local best = nil
-    local bestVolume = math.huge
+    local bestScore = -1
 
-    -- Subfolders that are not wear names hold the geometry.
+    -- WEAR FOLDERS FIRST. This is the order the previews worked in, because the
+    -- original standalone window produced them with exactly this lookup - the C4
+    -- folder happens to hold only SurfaceAppearance, which made it look like the
+    -- wear folders were the wrong place, but knives, guns and gloves all keep
+    -- their mesh there. Demoting wear to a fallback is what broke the cards.
     pcall(function()
-        for _, folder in ipairs(weaponFolder:GetChildren()) do
-            if folder:IsA("Folder") and (not WEAR_NAMES[tostring(folder.Name):lower()]) then
+        for _, wearFolder in ipairs(weaponFolder:GetChildren()) do
+            if wearFolder:IsA("Folder") then
+                local wearName = tostring(wearFolder.Name):lower()
+                local score = (wearName == "factory new" or wearName == "vanilla"
+                    or wearName == "stock") and 5 or 1
+
                 local parts = {}
-                collectParts(folder, parts, 1)
-                if #parts > 0 then
-                    local volume = partsExtent(parts)
-                    -- Smallest wins: the weapon is compact, the character rig
-                    -- stored next to it is not.
-                    if volume and volume < bestVolume then
-                        bestVolume = volume
-                        best = parts
-                    end
+                collectParts(wearFolder, parts, 1)
+
+                if #parts > 0 and score > bestScore then
+                    best, bestScore = parts, score
                 end
             end
         end
@@ -375,14 +393,35 @@ local function getWeaponParts(weaponFolder)
 
     if best then return best end
 
-    -- Fall back to the whole weapon folder, in case the layout is a flat one.
+    -- Only then the geometry subfolders, for a weapon whose wear folders are
+    -- texture-only (the C4 is one of them).
+    local smallest = nil
+    local smallestVolume = math.huge
+    pcall(function()
+        for _, folder in ipairs(weaponFolder:GetChildren()) do
+            if folder:IsA("Folder") and (not WEAR_NAMES[tostring(folder.Name):lower()]) then
+                local parts = {}
+                collectParts(folder, parts, 1)
+                if #parts > 0 then
+                    local volume = partsExtent(parts)
+                    if volume and volume < smallestVolume then
+                        smallestVolume = volume
+                        smallest = parts
+                    end
+                end
+            end
+        end
+    end)
+    if smallest then return smallest end
+
+    -- Last resort: the whole weapon folder.
     pcall(function()
         local parts = {}
         collectParts(weaponFolder, parts, 0)
-        if #parts > 0 then best = parts end
+        if #parts > 0 then return parts end
     end)
 
-    return best
+    return nil
 end
 
 function SkinsLib.BuildModelFromDatabase(modelName, skinName)

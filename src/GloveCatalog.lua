@@ -44,7 +44,13 @@ local function attachPreviewModel(viewportFrame, clone)
 
     if not world then
         -- Very old client: direct parenting is all it understands.
-        attachPreviewModel(viewportFrame, clone)
+        -- Parented directly to the frame, which is what this client actually
+    -- renders. An earlier commit moved this into a WorldModel on the theory that
+    -- ViewportFrames had stopped rendering direct children - but the previews DID
+    -- work in the original standalone Linoria window, which used this exact
+    -- parenting. The evidence contradicted the theory, so it is reverted rather
+    -- than left in on a hunch.
+    clone.Parent = viewportFrame
         return clone
     end
 
@@ -113,7 +119,13 @@ local function setupGloveViewport(viewportFrame, gloveModel, skinName)
     local cloneOk, cloneRes = pcall(function() return model:Clone() end)
     if cloneOk and cloneRes then clone = cloneRes end
 
-    attachPreviewModel(viewportFrame, clone)
+    -- Parented directly to the frame, which is what this client actually
+    -- renders. An earlier commit moved this into a WorldModel on the theory that
+    -- ViewportFrames had stopped rendering direct children - but the previews DID
+    -- work in the original standalone Linoria window, which used this exact
+    -- parenting. The evidence contradicted the theory, so it is reverted rather
+    -- than left in on a hunch.
+    clone.Parent = viewportFrame
 
     local cf, size = clone:GetBoundingBox()
     local maxDim = math.max(size.X, size.Y, size.Z, 0.5)
