@@ -165,6 +165,20 @@ end
 
 SkinsLib.RawGetters = SkinsLib.RawGetters or {}
 
+-- Forward declaration. skinAssetRoots is defined further down this file, next to the
+-- other asset-path helpers it belongs with, but Report below already calls it.
+--
+-- Without this, Report's body resolved the name as a GLOBAL - nil - and died with
+-- "attempt to call a nil value" the moment init.lua asked for the report. Lua only
+-- looks ahead for locals it can see a declaration for; a later `local function`
+-- is invisible from above, it is a fresh local, not a hoisted one.
+--
+-- This is the third time a helper has been used above its own declaration in this
+-- codebase (WEAR_NAMES, then this), and it is invisible to a syntax check - the
+-- file compiles fine and only fails when the function is actually called. A test
+-- now scans for it.
+local skinAssetRoots
+
 SkinsLib.Report = function()
     local head
     if SkinsLib.Resolved then
@@ -475,7 +489,7 @@ end
 -- Note the wear folders hold SurfaceAppearance only - textures with no mesh - so
 -- the parts have to come from a level or two above them, not from inside a wear
 -- folder.
-local function skinAssetRoots()
+skinAssetRoots = function()
     local roots = {}
 
     pcall(function()
