@@ -100,28 +100,96 @@ do
     end
 end
 
+-- Getters in the game module that could plausibly return a weapon MODEL.
+--
+-- The live build does not export "GetCharacterModel" - the observed names are
+-- GetWearNameForFloat, GetGloves, GetMagazine, GetkillTrackValue,
+-- GetBadgeModel, GetItemIconImage, ObserveItemStockSchemas, GetCharmModel and a
+-- truncated "GetWor...". Rather than hard-code a guess, every function whose name
+-- looks model-ish is collected and TRIED at runtime: the caller passes the
+-- arguments, and the first call that comes back with a real Model wins. That is
+-- self-validating, so it does not matter which of them is the right one.
+--
+-- Excluded: anything that returns an image, and the schema observer, which would
+-- otherwise be called with weapon arguments and could block or throw.
+SkinsLib.RawGetters = {}
+
+do
+    local mod = SkinsLib.Module
+    if mod then
+        local names = {}
+        for key, value in pairs(mod) do
+            if type(key) == "string" then
+                table.insert(names, key)
+                if type(value) == "function" then
+                    SkinsLib.Found[#SkinsLib.Found + 1] = key
+
+                    local lower = key:lower()
+                    local looksModel = lower:find("model", 1, true) ~= nil
+                    local excluded = lower:find("icon", 1, true) ~= nil
+                        or lower:find("image", 1, true) ~= nil
+                        or lower:find("schema", 1, true) ~= nil
+                        or lower:find("observe", 1, true) ~= nil
+                        or lower:find("mag", 1, true) ~= nil
+                    if looksModel and not excluded then
+                        SkinsLib.RawGetters[#SkinsLib.RawGetters + 1] = key
+                    end
+                end
+            end
+        end
+        table.sort(names)
+        SkinsLib.Names = names
+    end
+end
+
+-- Does the value look like a Model that actually has geometry in it?
+local function usableModel(value)
+    if type(value) ~= "table" then return false end
+
+    local className = nil
+    pcall(function() className = value.ClassName end)
+    if className ~= "Model" then return false end
+
+    local count = 0
+    pcall(function()
+        for _, d in ipairs(value:GetDescendants()) do
+            local isPart = false
+            pcall(function() isPart = d:IsA("BasePart") end)
+            if isPart then count = count + 1 end
+            if count > 0 then return end
+        end
+    end)
+
+    return count > 0
+end
+
+SkinsLib.RawGetters = SkinsLib.RawGetters or {}
+
 SkinsLib.Report = function()
     local head
     if SkinsLib.Resolved then
         head = "SkinsLib OK: " .. SkinsLib.Resolved
-            .. "  fns: " .. table.concat(SkinsLib.Found, ", ")
     else
         head = "SkinsLib NOT resolved (tried " .. #CANDIDATE_PATHS .. " paths)"
     end
 
-    -- Append whether previews can actually be built. "OK" on its own is not the
-    -- question being asked; an empty card is, and the two have very different
-    -- causes (a failed require vs geometry that is nowhere to be found).
-    local hasGetter = (type(SkinsLib.GetCharacterModel) == "function")
-    local probe = nil
-    pcall(function()
-        probe = SkinsLib.BuildModelFromDatabase("C4", "Factory New")
-    end)
-    head = head
-        .. "  getchar=" .. tostring(hasGetter)
-        .. "  probe=" .. tostring(probe ~= nil)
+    -- getchar used to report SkinsLib.GetCharacterModel, which is this file's own
+    -- wrapper and therefore always non-nil - a diagnostic that could not fail is
+    -- worse than none. It now counts the RAW module's model-ish getters.
+    head = head .. "  rawmodel=" .. tostring(#SkinsLib.RawGetters)
+        .. "  probe=" .. tostring(usableModel(SkinsLib.BuildModelFromDatabase("C4", "Factory New")))
 
     return head
+end
+
+-- Every exported function name, one per line. A single joined line got truncated
+-- on screen and the cut fell in the middle of the one name that mattered.
+SkinsLib.ReportFns = function()
+    local lines = {}
+    for i = 1, #SkinsLib.Found do
+        lines[#lines + 1] = SkinsLib.Found[i]
+    end
+    return lines
 end
 
 --------------------------------------------------------------------
@@ -144,18 +212,55 @@ end
 -- empty once the require path was fixed. The weapon models themselves live under
 -- ReplicatedStorage/Database/<weapon>/<wear>/... , so the model is assembled
 -- from those parts instead of asking the library for it.
+-- GetCharacterModel(modelName, skinName, scale) -> Model | nil
+--
+-- There is no "GetCharacterModel" in the live build, so the old hard-coded list
+-- of guesses never matched and every card fell through to the Database fallback -
+-- which also returns nothing, because the wear folders hold only SurfaceAppearance
+-- instances and no BaseParts at all.
+--
+-- Instead every model-ish getter the module actually exports is tried, in turn,
+-- with the arguments this library is already given. The first one that returns a
+-- real Model with geometry in it wins. Getter names are collected from the module
+-- itself, so this works whatever the next update renames things to.
+--
+-- The scale argument is the third one because the observed naming convention is
+-- float-based ("GetWearNameForFloat"), so the float is what these functions
+-- expect in that position.
 function SkinsLib.GetCharacterModel(modelName, skinName, scale)
     local raw = SkinsLib.Raw
-    if not raw then return nil end
+    if raw then
+        -- Exact names first, in case a build does ship one of them.
+        for _, preferred in ipairs({ "GetCharacterModel", "GetSkinModel", "GetModel" }) do
+            local getter = nil
+            pcall(function() getter = raw[preferred] end)
+            if type(getter) == "function" then
+                local ok, model = pcall(function()
+                    return getter(modelName, skinName, scale)
+                end)
+                if ok and usableModel(model) then return model end
+            end
+        end
 
-    -- If a future build does expose a real model getter, prefer it.
-    local getter = raw.GetCharacterModel or raw.GetSkinModel or raw.GetModel
-    if type(getter) == "function" then
-        local ok, model = pcall(function() return getter(modelName, skinName, scale) end)
-        if ok and model then return model end
+        -- Then everything that looks model-ish, tried for real.
+        for _, name in ipairs(SkinsLib.RawGetters) do
+            local getter = nil
+            pcall(function() getter = raw[name] end)
+            if type(getter) == "function" then
+                local ok, model = pcall(function()
+                    return getter(modelName, skinName, scale)
+                end)
+                if ok and usableModel(model) then
+                    SkinsLib.LastGetter = name
+                    return model
+                end
+            end
+        end
     end
 
-    return SkinsLib.BuildModelFromDatabase(modelName, skinName)
+    local fallback = SkinsLib.BuildModelFromDatabase(modelName, skinName)
+    if fallback then return fallback end
+    return nil
 end
 
 -- Build a Model out of the geometry the game stores in ReplicatedStorage.
@@ -186,16 +291,58 @@ local MAX_DEPTH = 5
 -- size, a fraction of the cost.
 local MAX_PARTS = 8
 
+-- Which wear folders exist for a weapon, and the BaseParts inside the best one.
+--
+-- THE WEAR FOLDERS ARE NOT WHERE THE GEOMETRY IS. An instance dump of the live
+-- game shows Database/<Weapon>/<Wear>/ containing nothing but SurfaceAppearance
+-- instances - textures with no mesh and no BasePart to attach to. Searching there
+-- is why probe=false: there is literally nothing to clone.
+--
+-- The geometry sits one level up, in a sibling folder under Database/<Weapon>/
+-- that holds the weapon's own models. For the C4 that is:
+--
+--   Database/<Weapon>/C4/Weapon/{ Body, Details, Switch, SwitchFlip,
+--                                  Screen, FlashingLight, ... }
+--
+-- so the search walks the weapon folder's subfolders and keeps the one with the
+-- smallest bounding extent - the weapon is small and the character rig stored
+-- beside it is not, so "smallest" identifies the gun rather than the soldier.
 local function collectParts(node, out, depth)
     if depth > MAX_DEPTH or #out >= MAX_PARTS then return end
-    for _, d in ipairs(node:GetChildren()) do
-        if #out >= MAX_PARTS then return end
-        if d:IsA("BasePart") then
-            table.insert(out, d)
-        else
-            collectParts(d, out, depth + 1)
+    pcall(function()
+        for _, d in ipairs(node:GetChildren()) do
+            if #out >= MAX_PARTS then return end
+            local isPart = false
+            pcall(function() isPart = d:IsA("BasePart") end)
+            if isPart then
+                table.insert(out, d)
+            else
+                collectParts(d, out, depth + 1)
+            end
+        end
+    end)
+end
+
+local function partsExtent(parts)
+    local minX, minY, minZ = math.huge, math.huge, math.huge
+    local maxX, maxY, maxZ = -math.huge, -math.huge, -math.huge
+    local n = 0
+    for _, part in ipairs(parts) do
+        local p, s = nil, nil
+        pcall(function() p = part.Position end)
+        pcall(function() s = part.Size end)
+        if p and s then
+            n = n + 1
+            if p.X - s.X / 2 < minX then minX = p.X - s.X / 2 end
+            if p.Y - s.Y / 2 < minY then minY = p.Y - s.Y / 2 end
+            if p.Z - s.Z / 2 < minZ then minZ = p.Z - s.Z / 2 end
+            if p.X + s.X / 2 > maxX then maxX = p.X + s.X / 2 end
+            if p.Y + s.Y / 2 > maxY then maxY = p.Y + s.Y / 2 end
+            if p.Z + s.Z / 2 > maxZ then maxZ = p.Z + s.Z / 2 end
         end
     end
+    if n == 0 then return nil end
+    return (maxX - minX) * (maxY - minY) * (maxZ - maxZ)
 end
 
 -- Which wear folders exist for a weapon, and the BaseParts inside the best one.
@@ -205,32 +352,35 @@ end
 -- per-skin-name matching is required.
 local function getWeaponParts(weaponFolder)
     local best = nil
-    local bestScore = -1
+    local bestVolume = math.huge
 
+    -- Subfolders that are not wear names hold the geometry.
     pcall(function()
-        for _, wearFolder in ipairs(weaponFolder:GetChildren()) do
-            if wearFolder:IsA("Folder") then
-                local wearName = tostring(wearFolder.Name):lower()
-                local score = (wearName == "factory new" or wearName == "vanilla"
-                    or wearName == "stock") and 5 or 1
-
+        for _, folder in ipairs(weaponFolder:GetChildren()) do
+            if folder:IsA("Folder") and (not WEAR_NAMES[tostring(folder.Name):lower()]) then
                 local parts = {}
-                collectParts(wearFolder, parts, 1)
-
-                if #parts > 0 and score > bestScore then
-                    best, bestScore = parts, score
+                collectParts(folder, parts, 1)
+                if #parts > 0 then
+                    local volume = partsExtent(parts)
+                    -- Smallest wins: the weapon is compact, the character rig
+                    -- stored next to it is not.
+                    if volume and volume < bestVolume then
+                        bestVolume = volume
+                        best = parts
+                    end
                 end
             end
         end
     end)
 
-    if not best then
-        pcall(function()
-            local parts = {}
-            collectParts(weaponFolder, parts, 0)
-            if #parts > 0 then best = parts end
-        end)
-    end
+    if best then return best end
+
+    -- Fall back to the whole weapon folder, in case the layout is a flat one.
+    pcall(function()
+        local parts = {}
+        collectParts(weaponFolder, parts, 0)
+        if #parts > 0 then best = parts end
+    end)
 
     return best
 end
